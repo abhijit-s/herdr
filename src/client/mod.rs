@@ -234,20 +234,28 @@ fn setup_terminal_with_capabilities(
         execute!(io::stdout(), DisableMouseCapture)?;
     }
 
-    // tmux doesn't understand kitty keyboard protocol push.
-    // Enable modifyOtherKeys mode 2 for tmux only for the full app client.
-    let in_tmux = enable_client_protocols && std::env::var("TMUX").is_ok();
-    if in_tmux {
-        io::stdout().write_all(b"\x1b[>4;2m")?;
+    let modify_other_keys_mode = enable_client_protocols
+        .then(|| {
+            crate::input::host_modify_other_keys_mode(
+                std::env::var("TMUX").is_ok(),
+                std::env::var("TERM_PROGRAM").ok().as_deref(),
+                std::env::var_os("WEZTERM_PANE").is_some(),
+            )
+        })
+        .flatten();
+    if let Some(mode) = modify_other_keys_mode {
+        io::stdout().write_all(mode.set_sequence())?;
         io::stdout().flush()?;
     }
 
-    Ok(TerminalGuard { in_tmux })
+    Ok(TerminalGuard {
+        reset_modify_other_keys: modify_other_keys_mode.is_some(),
+    })
 }
 
 /// Guard that restores the terminal when dropped.
 struct TerminalGuard {
-    in_tmux: bool,
+    reset_modify_other_keys: bool,
 }
 
 fn write_terminal_restore_postlude(writer: &mut impl io::Write) -> io::Result<()> {
@@ -264,11 +272,11 @@ fn set_mouse_capture(enabled: bool) -> io::Result<()> {
     }
 }
 
-fn restore_terminal_state(in_tmux: bool) {
+fn restore_terminal_state(reset_modify_other_keys: bool) {
     let _ = clear_received_kitty_graphics(&mut io::stdout());
 
     // Reset modifyOtherKeys if we enabled it.
-    if in_tmux {
+    if reset_modify_other_keys {
         let _ = io::stdout().write_all(b"\x1b[>4;0m");
         let _ = io::stdout().flush();
     }
@@ -286,7 +294,7 @@ fn restore_terminal_state(in_tmux: bool) {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        restore_terminal_state(self.in_tmux);
+        restore_terminal_state(self.reset_modify_other_keys);
     }
 }
 

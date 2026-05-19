@@ -1025,7 +1025,7 @@ impl PaneRuntime {
         Self::test_with_channel_and_scrollback_bytes(cols, rows, scrollback_limit_bytes, bytes, 4).0
     }
 
-    fn test_with_channel_and_scrollback_bytes(
+    pub(crate) fn test_with_channel_and_scrollback_bytes(
         cols: u16,
         rows: u16,
         scrollback_limit_bytes: usize,

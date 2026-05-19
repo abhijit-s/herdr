@@ -47,6 +47,37 @@ pub fn ime_compatible_keyboard_enhancement_flags() -> KeyboardEnhancementFlags {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModifyOtherKeysMode {
+    Mode1,
+    Mode2,
+}
+
+impl ModifyOtherKeysMode {
+    pub fn set_sequence(self) -> &'static [u8] {
+        match self {
+            Self::Mode1 => b"\x1b[>4;1m",
+            Self::Mode2 => b"\x1b[>4;2m",
+        }
+    }
+}
+
+pub fn host_modify_other_keys_mode(
+    in_tmux: bool,
+    term_program: Option<&str>,
+    wezterm_pane: bool,
+) -> Option<ModifyOtherKeysMode> {
+    if in_tmux {
+        return Some(ModifyOtherKeysMode::Mode2);
+    }
+
+    if wezterm_pane || term_program.is_some_and(|program| program.eq_ignore_ascii_case("wezterm")) {
+        return Some(ModifyOtherKeysMode::Mode1);
+    }
+
+    None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyboardProtocol {
     Legacy,
     Kitty { flags: u16 },
@@ -112,5 +143,34 @@ mod tests {
         assert!(flags.contains(KeyboardEnhancementFlags::REPORT_EVENT_TYPES));
         assert!(flags.contains(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS));
         assert!(!flags.contains(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+    }
+
+    #[test]
+    fn modify_other_keys_mode_is_enabled_for_tmux() {
+        assert_eq!(
+            host_modify_other_keys_mode(true, Some("WezTerm"), true),
+            Some(ModifyOtherKeysMode::Mode2)
+        );
+    }
+
+    #[test]
+    fn modify_other_keys_mode_is_enabled_for_wezterm_hosts() {
+        assert_eq!(
+            host_modify_other_keys_mode(false, Some("WezTerm"), false),
+            Some(ModifyOtherKeysMode::Mode1)
+        );
+        assert_eq!(
+            host_modify_other_keys_mode(false, None, true),
+            Some(ModifyOtherKeysMode::Mode1)
+        );
+    }
+
+    #[test]
+    fn modify_other_keys_mode_is_not_enabled_for_unknown_hosts() {
+        assert_eq!(
+            host_modify_other_keys_mode(false, Some("ghostty"), false),
+            None
+        );
+        assert_eq!(host_modify_other_keys_mode(false, None, false), None);
     }
 }

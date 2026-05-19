@@ -2453,6 +2453,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn route_client_input_preserves_shift_enter_for_modify_other_keys_pane() {
+        let mut app = test_app();
+        let mut workspace = Workspace::test_new("test");
+        let focused = workspace.focused_pane_id().unwrap();
+        let (runtime, mut rx) =
+            TerminalRuntime::test_with_channel_and_scrollback_bytes(80, 24, 0, b"\x1b[>4;1m", 4);
+        workspace.tabs[0].runtimes.insert(focused, runtime);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        app.route_client_input(b"\x1b[13;2u".to_vec());
+
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            bytes::Bytes::from_static(b"\x1b[27;2;13~")
+        );
+    }
+
+    #[tokio::test]
     async fn route_client_input_splits_multi_event_payloads_before_forwarding() {
         let mut app = test_app();
         let mut workspace = Workspace::test_new("test");
