@@ -1530,6 +1530,44 @@ impl AppState {
         true
     }
 
+    pub(crate) fn url_at_pane_cell(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+        pane_id: crate::layout::PaneId,
+        viewport_row: u16,
+        col: u16,
+    ) -> Option<String> {
+        let ws_idx = self
+            .active
+            .filter(|idx| self.workspaces.get(*idx).is_some())?;
+        let info = self.pane_info_by_id(pane_id)?;
+        if viewport_row >= info.inner_rect.height || col >= info.inner_rect.width {
+            return None;
+        }
+
+        let rt = self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, pane_id)?;
+        let screen_col = info.inner_rect.x.saturating_add(col);
+        let screen_row = info.inner_rect.y.saturating_add(viewport_row);
+        if let Some((_, _, uri)) = rt
+            .visible_hyperlinks(info.inner_rect)
+            .into_iter()
+            .find(|((x, y), _, _)| *x == screen_col && *y == screen_row)
+        {
+            return safe_web_url(&uri).map(str::to_owned);
+        }
+
+        let metrics = self.pane_scroll_metrics(terminal_runtimes, pane_id);
+        let row_selection = Selection::range(
+            pane_id,
+            viewport_row,
+            0,
+            info.inner_rect.width.saturating_sub(1),
+            metrics,
+        );
+        let row_text = rt.extract_selection(&row_selection)?;
+        url_at_column(&row_text, col).map(str::to_owned)
+    }
+
     pub fn copy_selection(&mut self, terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry) {
         let mut sel = match self.selection.take() {
             Some(sel) => sel,
@@ -1556,6 +1594,10 @@ impl AppState {
 
         self.clear_selection();
     }
+}
+
+pub(crate) fn safe_web_url(url: &str) -> Option<&str> {
+    (url.starts_with("http://") || url.starts_with("https://")).then_some(url)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1599,6 +1641,15 @@ fn word_bounds_at_column(row: &str, col: u16) -> Option<(u16, u16)> {
 
     // Convert the internal cell span back to inclusive terminal columns.
     Some(span.columns(&cells))
+}
+
+pub(crate) fn url_at_column(row: &str, col: u16) -> Option<&str> {
+    let cells = text_cells(row);
+    let clicked_idx = cell_index_at_column(&cells, col)?;
+    let span = url_span_at_column(&cells, clicked_idx)?;
+    let start_byte = byte_index_for_cell(row, span.start);
+    let end_byte = byte_index_after_cell(row, span.end);
+    safe_web_url(row.get(start_byte..end_byte)?)
 }
 
 fn token_span_at_column(cells: &[TextCell], clicked_idx: usize) -> Option<CellSpan> {
@@ -1645,6 +1696,20 @@ fn cell_index_at_column(cells: &[TextCell], col: u16) -> Option<usize> {
     cells
         .iter()
         .position(|cell| cell.start_col <= col && col <= cell.end_col)
+}
+
+fn byte_index_for_cell(row: &str, cell_idx: usize) -> usize {
+    row.char_indices()
+        .nth(cell_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(row.len())
+}
+
+fn byte_index_after_cell(row: &str, cell_idx: usize) -> usize {
+    row.char_indices()
+        .nth(cell_idx.saturating_add(1))
+        .map(|(idx, _)| idx)
+        .unwrap_or(row.len())
 }
 
 fn url_span_at_column(cells: &[TextCell], clicked_idx: usize) -> Option<CellSpan> {
@@ -2175,6 +2240,10 @@ mod tests {
         Some(text_in_cell_range(row, start, end))
     }
 
+    fn selected_url<'a>(row: &'a str, click: &str) -> Option<&'a str> {
+        url_at_column(row, col_of(row, click))
+    }
+
     fn text_in_cell_range(row: &str, start_col: u16, end_col: u16) -> String {
         text_cells(row)
             .into_iter()
@@ -2341,6 +2410,23 @@ mod tests {
         ] {
             assert_selects_nothing(row, click);
         }
+    }
+
+    #[test]
+    fn url_at_column_returns_safe_visible_url_only() {
+        assert_eq!(
+            selected_url("see https://example.com/a(b)c.", "example"),
+            Some("https://example.com/a(b)c")
+        );
+        assert_eq!(
+            selected_url("[docs](https://example.com/docs),", "example"),
+            Some("https://example.com/docs")
+        );
+        assert_eq!(
+            selected_url("[docs](https://example.com/docs)", "docs"),
+            None
+        );
+        assert_eq!(selected_url("open file:///tmp/report", "file"), None);
     }
 
     #[test]

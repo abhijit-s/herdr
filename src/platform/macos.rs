@@ -228,6 +228,16 @@ pub fn write_clipboard(bytes: &[u8]) -> bool {
     )
 }
 
+pub fn open_url(url: &str) -> std::io::Result<()> {
+    Command::new("open")
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+
 pub fn read_clipboard_image() -> Option<ClipboardImage> {
     let path = std::env::temp_dir().join(format!(
         "herdr-clipboard-image-{}-{}.png",

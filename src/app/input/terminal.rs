@@ -232,6 +232,20 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
     }
 
+    fn modified_mouse(
+        kind: MouseEventKind,
+        col: u16,
+        row: u16,
+        modifiers: KeyModifiers,
+    ) -> crossterm::event::MouseEvent {
+        crossterm::event::MouseEvent {
+            kind,
+            column: col,
+            row,
+            modifiers,
+        }
+    }
+
     fn clipboard_write_content(app: &mut App) -> Vec<u8> {
         match app.event_rx.try_recv().expect("clipboard write event") {
             AppEvent::ClipboardWrite { content } => content,
@@ -430,6 +444,64 @@ mod tests {
 
         assert_eq!(clipboard_write_content(&mut app), b"done");
         assert_visible_selection(&app);
+    }
+
+    #[tokio::test]
+    async fn modified_pane_click_does_not_seed_double_click_copy() {
+        let (mut app, info) = app_with_screen_bytes(b"alpha beta");
+        let col = info.inner_rect.x + 7;
+        let row = info.inner_rect.y;
+
+        app.handle_mouse(modified_mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            col,
+            row,
+            KeyModifiers::CONTROL,
+        ));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+
+        assert!(app.event_rx.try_recv().is_err());
+        assert!(app.selection_highlight_clear_deadline.is_none());
+    }
+
+    #[tokio::test]
+    async fn pane_cell_url_resolver_finds_visible_url() {
+        let line = "see https://example.com/pr/307.";
+        let (app, info) = app_with_screen_bytes(line.as_bytes());
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let col = line.find("example").expect("url host") as u16;
+
+        assert_eq!(
+            app.state
+                .url_at_pane_cell(&app.terminal_runtimes, pane_id, 0, col)
+                .as_deref(),
+            Some("https://example.com/pr/307")
+        );
+        assert_eq!(
+            app.state.url_at_pane_cell(
+                &app.terminal_runtimes,
+                pane_id,
+                0,
+                info.inner_rect.width - 1
+            ),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn pane_cell_url_resolver_prefers_osc8_hyperlink() {
+        let (app, _info) = app_with_screen_bytes(
+            b"\x1b]8;;https://example.com/hidden-target\x1b\\label\x1b]8;;\x1b\\",
+        );
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        assert_eq!(
+            app.state
+                .url_at_pane_cell(&app.terminal_runtimes, pane_id, 0, 1)
+                .as_deref(),
+            Some("https://example.com/hidden-target")
+        );
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 //! Input handling — translates crossterm key/mouse events into state mutations.
 
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::app::PaneClickState;
 use crate::input::TerminalKey;
@@ -195,6 +195,10 @@ impl App {
             }
         }
 
+        if self.handle_modified_url_click(mouse) {
+            return;
+        }
+
         let handled_pane_double_click = self.handle_pane_double_click(mouse);
 
         let previous_agent_panel_scope = self.state.agent_panel_scope;
@@ -248,6 +252,33 @@ impl App {
         }
     }
 
+    fn handle_modified_url_click(&mut self, mouse: MouseEvent) -> bool {
+        if self.state.mode != Mode::Terminal
+            || !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            || !mouse.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            return false;
+        }
+
+        let Some(info) = self.state.pane_at(mouse.column, mouse.row).cloned() else {
+            return false;
+        };
+        let viewport_row = mouse.row.saturating_sub(info.inner_rect.y);
+        let col = mouse.column.saturating_sub(info.inner_rect.x);
+        let Some(url) =
+            self.state
+                .url_at_pane_cell(&self.terminal_runtimes, info.id, viewport_row, col)
+        else {
+            return false;
+        };
+
+        self.last_pane_click = None;
+        if let Err(err) = crate::platform::open_url(&url) {
+            tracing::warn!(err = %err, url = %url, "failed to open pane URL");
+        }
+        true
+    }
+
     fn handle_pane_double_click(&mut self, mouse: MouseEvent) -> bool {
         // A pane press stops being a double-click candidate once it becomes
         // a drag or completes as a real text selection.
@@ -288,6 +319,11 @@ impl App {
 
     fn pane_click_candidate(&mut self, mouse: MouseEvent) -> Option<PaneClickState> {
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return None;
+        }
+
+        if !mouse.modifiers.is_empty() {
+            self.last_pane_click = None;
             return None;
         }
 
