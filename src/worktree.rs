@@ -68,11 +68,21 @@ pub(crate) fn expand_tilde_path(path: &str) -> PathBuf {
     });
     if let Some(rest) = tilde_rest {
         return home_dir_from_env(cfg!(windows), |key| std::env::var_os(key))
-            .map(|home| home.join(rest))
+            .map(|home| join_tilde_rest(home, rest))
             .unwrap_or_else(|_| PathBuf::from(path));
     }
 
     PathBuf::from(path)
+}
+
+fn join_tilde_rest(home: PathBuf, rest: &str) -> PathBuf {
+    if cfg!(windows) {
+        rest.split(['/', '\\'])
+            .filter(|component| !component.is_empty())
+            .fold(home, |path, component| path.join(component))
+    } else {
+        home.join(rest)
+    }
 }
 
 fn home_dir_from_env(
@@ -519,11 +529,20 @@ prunable stale
 
     #[cfg(windows)]
     #[test]
-    fn windows_tilde_expansion_accepts_windows_separator() {
+    fn windows_tilde_expansion_normalizes_separators() {
         let old_home = std::env::var_os("HOME");
         let old_userprofile = std::env::var_os("USERPROFILE");
         std::env::set_var("HOME", "~");
         std::env::set_var("USERPROFILE", r"C:\Users\herdr");
+        let default_path = expand_tilde_path("~/.herdr/worktrees");
+        assert_eq!(
+            default_path,
+            PathBuf::from(r"C:\Users\herdr\.herdr\worktrees")
+        );
+        assert_eq!(
+            default_path.display().to_string(),
+            r"C:\Users\herdr\.herdr\worktrees"
+        );
         assert_eq!(
             expand_tilde_path(r"~\.herdr\worktrees"),
             PathBuf::from(r"C:\Users\herdr\.herdr\worktrees")

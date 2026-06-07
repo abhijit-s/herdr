@@ -17,16 +17,40 @@ const OMP_EXTENSION_INSTALL_NAME: &str = "herdr-omp-agent-state.ts";
 const OMP_EXTENSION_ASSET: &str = include_str!("assets/omp/herdr-agent-state.ts");
 const OMP_INTEGRATION_VERSION: u32 = 2;
 const PI_CODING_AGENT_DIR_ENV_VAR: &str = "PI_CODING_AGENT_DIR";
-const CLAUDE_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
-const CLAUDE_HOOK_ASSET: &str = include_str!("assets/claude/herdr-agent-state.sh");
+const CLAUDE_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const CLAUDE_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/claude/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/claude/herdr-agent-state.sh")
+};
 const CLAUDE_INTEGRATION_VERSION: u32 = 5;
 const CLAUDE_CONFIG_DIR_ENV_VAR: &str = "CLAUDE_CONFIG_DIR";
-const CODEX_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
-const CODEX_HOOK_ASSET: &str = include_str!("assets/codex/herdr-agent-state.sh");
+const CODEX_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const CODEX_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/codex/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/codex/herdr-agent-state.sh")
+};
 const CODEX_INTEGRATION_VERSION: u32 = 5;
 const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
-const KIMI_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
-const KIMI_HOOK_ASSET: &str = include_str!("assets/kimi/herdr-agent-state.sh");
+const KIMI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const KIMI_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/kimi/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/kimi/herdr-agent-state.sh")
+};
 const KIMI_INTEGRATION_VERSION: u32 = 1;
 const KIMI_CODE_HOME_ENV_VAR: &str = "KIMI_CODE_HOME";
 const KIMI_CONFIG_BLOCK_BEGIN: &str = "# >>> herdr kimi integration";
@@ -44,12 +68,28 @@ const KIMI_HOOK_EVENTS: [(&str, &str); 10] = [
     ("StopFailure", "idle"),
     ("SessionEnd", "release"),
 ];
-const COPILOT_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
-const COPILOT_HOOK_ASSET: &str = include_str!("assets/copilot/herdr-agent-state.sh");
+const COPILOT_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const COPILOT_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/copilot/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/copilot/herdr-agent-state.sh")
+};
 const COPILOT_INTEGRATION_VERSION: u32 = 1;
 const COPILOT_HOME_ENV_VAR: &str = "COPILOT_HOME";
-const DROID_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
-const DROID_HOOK_ASSET: &str = include_str!("assets/droid/herdr-agent-state.sh");
+const DROID_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const DROID_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/droid/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/droid/herdr-agent-state.sh")
+};
 const DROID_INTEGRATION_VERSION: u32 = 1;
 const OPENCODE_PLUGIN_INSTALL_NAME: &str = "herdr-agent-state.js";
 const OPENCODE_PLUGIN_ASSET: &str = include_str!("assets/opencode/herdr-agent-state.js");
@@ -60,8 +100,16 @@ const HERMES_PLUGIN_INIT_INSTALL_NAME: &str = "__init__.py";
 const HERMES_PLUGIN_MANIFEST_ASSET: &str = include_str!("assets/hermes/plugin.yaml");
 const HERMES_PLUGIN_INIT_ASSET: &str = include_str!("assets/hermes/__init__.py");
 const HERMES_INTEGRATION_VERSION: u32 = 2;
-const QODERCLI_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
-const QODERCLI_HOOK_ASSET: &str = include_str!("assets/qodercli/herdr-agent-state.sh");
+const QODERCLI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const QODERCLI_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/qodercli/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/qodercli/herdr-agent-state.sh")
+};
 const QODERCLI_INTEGRATION_VERSION: u32 = 1;
 const QODERCLI_CONFIG_DIR_ENV_VAR: &str = "QODER_CONFIG_DIR";
 const INTEGRATION_VERSION_MARKER: &str = "HERDR_INTEGRATION_VERSION=";
@@ -1074,55 +1122,24 @@ pub(crate) fn install_claude() -> io::Result<ClaudeInstallPaths> {
         "claude settings",
         "claude settings hooks",
     )?;
-    let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-    remove_command_hook(
-        hooks,
-        "PostToolUse",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "PostToolUseFailure",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "SubagentStop",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "PermissionRequest",
-        &format!("bash {quoted_hook_path} blocked"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "SessionStart",
-        &format!("bash {quoted_hook_path} idle"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "UserPromptSubmit",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "PreToolUse",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(hooks, "Stop", &format!("bash {quoted_hook_path} idle"))?;
-    remove_command_hook(
-        hooks,
-        "SessionEnd",
-        &format!("bash {quoted_hook_path} release"),
-    )?;
+    remove_hook_commands(hooks, "PostToolUse", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "PostToolUseFailure", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "SubagentStop", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
+    remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "SessionEnd", &hook_path, Some("release"))?;
+    remove_hook_commands(hooks, "SessionStart", &hook_path, Some("session"))?;
     ensure_command_hook(
         hooks,
         "SessionStart",
-        format!("bash {quoted_hook_path} session"),
+        hook_command(&hook_path, Some("session")),
         10,
         Some("*"),
     )?;
+    remove_legacy_bash_hook_file(&hook_path)?;
 
     fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
 
@@ -1160,35 +1177,20 @@ pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
         "codex hooks file",
         "codex hooks file hooks",
     )?;
-    let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-    remove_command_hook(
-        hooks,
-        "PermissionRequest",
-        &format!("bash {quoted_hook_path} blocked"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "SessionStart",
-        &format!("bash {quoted_hook_path} idle"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "UserPromptSubmit",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(
-        hooks,
-        "PreToolUse",
-        &format!("bash {quoted_hook_path} working"),
-    )?;
-    remove_command_hook(hooks, "Stop", &format!("bash {quoted_hook_path} idle"))?;
+    remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
+    remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "SessionStart", &hook_path, Some("session"))?;
     ensure_command_hook(
         hooks,
         "SessionStart",
-        format!("bash {quoted_hook_path} session"),
+        hook_command(&hook_path, Some("session")),
         10,
         None,
     )?;
+    remove_legacy_bash_hook_file(&hook_path)?;
 
     fs::write(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
 
@@ -1236,6 +1238,7 @@ pub(crate) fn install_kimi() -> io::Result<KimiInstallPaths> {
     if new_config != existing_config {
         fs::write(&config_path, new_config)?;
     }
+    remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(KimiInstallPaths {
         hook_path,
@@ -1277,10 +1280,20 @@ pub(crate) fn install_copilot() -> io::Result<CopilotInstallPaths> {
         "copilot settings",
         "copilot settings hooks",
     )?;
-    let command = format!(
-        "bash {}",
-        shell_single_quote(&hook_path.display().to_string())
-    );
+    let command = hook_command(&hook_path, None);
+    for event in [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "Stop",
+        "agentStop",
+        "SessionEnd",
+        "notification",
+    ] {
+        remove_direct_hook_commands(hooks, event, &hook_path, None)?;
+    }
     ensure_direct_command_hook(hooks, "SessionStart", command.clone(), 10, None)?;
     ensure_direct_command_hook(hooks, "UserPromptSubmit", command.clone(), 10, None)?;
     ensure_direct_command_hook(hooks, "PreToolUse", command.clone(), 10, None)?;
@@ -1296,6 +1309,7 @@ pub(crate) fn install_copilot() -> io::Result<CopilotInstallPaths> {
         10,
         Some("permission_prompt|elicitation_dialog|agent_idle"),
     )?;
+    remove_legacy_bash_hook_file(&hook_path)?;
 
     fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
 
@@ -1339,15 +1353,15 @@ pub(crate) fn install_droid() -> io::Result<DroidInstallPaths> {
         "droid settings",
         "droid settings hooks",
     )?;
-    let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-    remove_command_hook(hooks, "SessionStart", &format!("bash {quoted_hook_path}"))?;
+    remove_hook_commands(hooks, "SessionStart", &hook_path, None)?;
     ensure_command_hook(
         hooks,
         "SessionStart",
-        format!("bash {quoted_hook_path}"),
+        hook_command(&hook_path, None),
         10,
         None,
     )?;
+    remove_legacy_bash_hook_file(&hook_path)?;
 
     fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
 
@@ -1364,8 +1378,7 @@ pub(crate) fn install_droid() -> io::Result<DroidInstallPaths> {
             "droid hooks file",
             "droid hooks file hooks",
         )? {
-            updated_legacy_hooks =
-                remove_command_hook(hooks, "SessionStart", &format!("bash {quoted_hook_path}"))?;
+            updated_legacy_hooks = remove_hook_commands(hooks, "SessionStart", &hook_path, None)?;
         }
         if updated_legacy_hooks {
             fs::write(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
@@ -1475,54 +1488,25 @@ pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallResult> {
             "claude settings",
             "claude settings hooks",
         )? {
-            let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-            updated_settings |= remove_command_hook(
-                hooks,
-                "SessionStart",
-                &format!("bash {quoted_hook_path} idle"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "SessionStart",
-                &format!("bash {quoted_hook_path} session"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "UserPromptSubmit",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "PreToolUse",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "PermissionRequest",
-                &format!("bash {quoted_hook_path} blocked"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "PostToolUse",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "PostToolUseFailure",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "SubagentStop",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
             updated_settings |=
-                remove_command_hook(hooks, "Stop", &format!("bash {quoted_hook_path} idle"))?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "SessionEnd",
-                &format!("bash {quoted_hook_path} release"),
-            )?;
+                remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "SessionStart", &hook_path, Some("session"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "PostToolUse", &hook_path, Some("working"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "PostToolUseFailure", &hook_path, Some("working"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "SubagentStop", &hook_path, Some("working"))?;
+            updated_settings |= remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "SessionEnd", &hook_path, Some("release"))?;
         }
 
         if updated_settings {
@@ -1530,7 +1514,8 @@ pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallResult> {
         }
     }
 
-    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(ClaudeUninstallResult {
         hook_path,
@@ -1559,34 +1544,16 @@ pub(crate) fn uninstall_codex() -> io::Result<CodexUninstallResult> {
             "codex hooks file",
             "codex hooks file hooks",
         )? {
-            let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-            updated_hooks |= remove_command_hook(
-                hooks,
-                "SessionStart",
-                &format!("bash {quoted_hook_path} idle"),
-            )?;
-            updated_hooks |= remove_command_hook(
-                hooks,
-                "SessionStart",
-                &format!("bash {quoted_hook_path} session"),
-            )?;
-            updated_hooks |= remove_command_hook(
-                hooks,
-                "UserPromptSubmit",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_hooks |= remove_command_hook(
-                hooks,
-                "PreToolUse",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_hooks |= remove_command_hook(
-                hooks,
-                "PermissionRequest",
-                &format!("bash {quoted_hook_path} blocked"),
-            )?;
+            updated_hooks |= remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
             updated_hooks |=
-                remove_command_hook(hooks, "Stop", &format!("bash {quoted_hook_path} idle"))?;
+                remove_hook_commands(hooks, "SessionStart", &hook_path, Some("session"))?;
+            updated_hooks |=
+                remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+            updated_hooks |=
+                remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
+            updated_hooks |=
+                remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
+            updated_hooks |= remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
         }
 
         if updated_hooks {
@@ -1594,7 +1561,8 @@ pub(crate) fn uninstall_codex() -> io::Result<CodexUninstallResult> {
         }
     }
 
-    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(CodexUninstallResult {
         hook_path,
@@ -1620,7 +1588,8 @@ pub(crate) fn uninstall_kimi() -> io::Result<KimiUninstallResult> {
         }
     }
 
-    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(KimiUninstallResult {
         hook_path,
@@ -1651,19 +1620,20 @@ pub(crate) fn uninstall_copilot() -> io::Result<CopilotUninstallResult> {
             "copilot settings",
             "copilot settings hooks",
         )? {
-            let command = format!(
-                "bash {}",
-                shell_single_quote(&hook_path.display().to_string())
-            );
-            updated_settings |= remove_direct_command_hook(hooks, "SessionStart", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "UserPromptSubmit", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "PreToolUse", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "PostToolUse", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "PostToolUseFailure", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "Stop", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "agentStop", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "SessionEnd", &command)?;
-            updated_settings |= remove_direct_command_hook(hooks, "notification", &command)?;
+            updated_settings |=
+                remove_direct_hook_commands(hooks, "SessionStart", &hook_path, None)?;
+            updated_settings |=
+                remove_direct_hook_commands(hooks, "UserPromptSubmit", &hook_path, None)?;
+            updated_settings |= remove_direct_hook_commands(hooks, "PreToolUse", &hook_path, None)?;
+            updated_settings |=
+                remove_direct_hook_commands(hooks, "PostToolUse", &hook_path, None)?;
+            updated_settings |=
+                remove_direct_hook_commands(hooks, "PostToolUseFailure", &hook_path, None)?;
+            updated_settings |= remove_direct_hook_commands(hooks, "Stop", &hook_path, None)?;
+            updated_settings |= remove_direct_hook_commands(hooks, "agentStop", &hook_path, None)?;
+            updated_settings |= remove_direct_hook_commands(hooks, "SessionEnd", &hook_path, None)?;
+            updated_settings |=
+                remove_direct_hook_commands(hooks, "notification", &hook_path, None)?;
         }
 
         if updated_settings {
@@ -1671,7 +1641,8 @@ pub(crate) fn uninstall_copilot() -> io::Result<CopilotUninstallResult> {
         }
     }
 
-    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(CopilotUninstallResult {
         hook_path,
@@ -1688,8 +1659,6 @@ pub(crate) fn uninstall_droid() -> io::Result<DroidUninstallResult> {
     let settings_path = droid_dir.join("settings.json");
     let mut updated_hooks = false;
     let mut updated_settings = false;
-    let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-
     if hooks_path.is_file() {
         let mut hooks_file = serde_json::from_str::<Value>(&fs::read_to_string(&hooks_path)?)
             .map_err(|err| {
@@ -1702,8 +1671,7 @@ pub(crate) fn uninstall_droid() -> io::Result<DroidUninstallResult> {
             "droid hooks file",
             "droid hooks file hooks",
         )? {
-            updated_hooks |=
-                remove_command_hook(hooks, "SessionStart", &format!("bash {quoted_hook_path}"))?;
+            updated_hooks |= remove_hook_commands(hooks, "SessionStart", &hook_path, None)?;
         }
 
         if updated_hooks {
@@ -1725,8 +1693,7 @@ pub(crate) fn uninstall_droid() -> io::Result<DroidUninstallResult> {
             "droid settings",
             "droid settings hooks",
         )? {
-            updated_settings =
-                remove_command_hook(hooks, "SessionStart", &format!("bash {quoted_hook_path}"))?;
+            updated_settings = remove_hook_commands(hooks, "SessionStart", &hook_path, None)?;
         }
 
         if updated_settings {
@@ -1734,7 +1701,8 @@ pub(crate) fn uninstall_droid() -> io::Result<DroidUninstallResult> {
         }
     }
 
-    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(DroidUninstallResult {
         hook_path,
@@ -1823,53 +1791,58 @@ pub(crate) fn install_qodercli() -> io::Result<QodercliInstallPaths> {
         "qodercli settings",
         "qodercli settings hooks",
     )?;
-    let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-
     // SubagentStop is intentionally *not* mapped to working: the hook script
     // returns early on it (mirroring assets/claude/herdr-agent-state.sh) so
     // that recap/away-summary frames cannot revive an idle pane.
+    remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
+    remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "SessionEnd", &hook_path, Some("release"))?;
     ensure_command_hook(
         hooks,
         "SessionStart",
-        format!("bash {quoted_hook_path} idle"),
+        hook_command(&hook_path, Some("idle")),
         10,
         Some("*"),
     )?;
     ensure_command_hook(
         hooks,
         "UserPromptSubmit",
-        format!("bash {quoted_hook_path} working"),
+        hook_command(&hook_path, Some("working")),
         10,
         Some("*"),
     )?;
     ensure_command_hook(
         hooks,
         "PreToolUse",
-        format!("bash {quoted_hook_path} working"),
+        hook_command(&hook_path, Some("working")),
         10,
         Some("*"),
     )?;
     ensure_command_hook(
         hooks,
         "PermissionRequest",
-        format!("bash {quoted_hook_path} blocked"),
+        hook_command(&hook_path, Some("blocked")),
         10,
         Some("*"),
     )?;
     ensure_command_hook(
         hooks,
         "Stop",
-        format!("bash {quoted_hook_path} idle"),
+        hook_command(&hook_path, Some("idle")),
         10,
         Some("*"),
     )?;
     ensure_command_hook(
         hooks,
         "SessionEnd",
-        format!("bash {quoted_hook_path} release"),
+        hook_command(&hook_path, Some("release")),
         10,
         Some("*"),
     )?;
+    remove_legacy_bash_hook_file(&hook_path)?;
 
     fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
 
@@ -1901,34 +1874,17 @@ pub(crate) fn uninstall_qodercli() -> io::Result<QodercliUninstallResult> {
             "qodercli settings",
             "qodercli settings hooks",
         )? {
-            let quoted_hook_path = shell_single_quote(&hook_path.display().to_string());
-            updated_settings |= remove_command_hook(
-                hooks,
-                "SessionStart",
-                &format!("bash {quoted_hook_path} idle"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "UserPromptSubmit",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "PreToolUse",
-                &format!("bash {quoted_hook_path} working"),
-            )?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "PermissionRequest",
-                &format!("bash {quoted_hook_path} blocked"),
-            )?;
             updated_settings |=
-                remove_command_hook(hooks, "Stop", &format!("bash {quoted_hook_path} idle"))?;
-            updated_settings |= remove_command_hook(
-                hooks,
-                "SessionEnd",
-                &format!("bash {quoted_hook_path} release"),
-            )?;
+                remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
+            updated_settings |= remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
+            updated_settings |=
+                remove_hook_commands(hooks, "SessionEnd", &hook_path, Some("release"))?;
         }
 
         if updated_settings {
@@ -1936,7 +1892,8 @@ pub(crate) fn uninstall_qodercli() -> io::Result<QodercliUninstallResult> {
         }
     }
 
-    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
 
     Ok(QodercliUninstallResult {
         hook_path,
@@ -2156,6 +2113,53 @@ fn remove_direct_command_hook(
     Ok(removed)
 }
 
+fn remove_hook_commands(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    hook_path: &Path,
+    action: Option<&str>,
+) -> io::Result<bool> {
+    let mut removed = false;
+    for command in hook_command_variants(hook_path, action) {
+        removed |= remove_command_hook(hooks, event, &command)?;
+    }
+    Ok(removed)
+}
+
+fn remove_direct_hook_commands(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    hook_path: &Path,
+    action: Option<&str>,
+) -> io::Result<bool> {
+    let mut removed = false;
+    for command in hook_command_variants(hook_path, action) {
+        removed |= remove_direct_command_hook(hooks, event, &command)?;
+    }
+    Ok(removed)
+}
+
+fn hook_command_variants(hook_path: &Path, action: Option<&str>) -> Vec<String> {
+    let mut commands = vec![hook_command(hook_path, action)];
+    push_unique_command(&mut commands, legacy_bash_hook_command(hook_path, action));
+
+    #[cfg(windows)]
+    {
+        push_unique_command(
+            &mut commands,
+            legacy_bash_hook_command(&legacy_bash_hook_path(hook_path), action),
+        );
+    }
+
+    commands
+}
+
+fn push_unique_command(commands: &mut Vec<String>, command: String) {
+    if !commands.iter().any(|existing| existing == &command) {
+        commands.push(command);
+    }
+}
+
 fn is_matching_command_hook(hook: &Value, command: &str) -> bool {
     hook.get("type").and_then(Value::as_str) == Some("command")
         && hook.get("command").and_then(Value::as_str) == Some(command)
@@ -2167,6 +2171,33 @@ fn remove_file_if_exists(path: &Path) -> io::Result<bool> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(err),
     }
+}
+
+#[cfg(windows)]
+fn legacy_bash_hook_path(hook_path: &Path) -> PathBuf {
+    hook_path.with_file_name("herdr-agent-state.sh")
+}
+
+#[cfg(windows)]
+fn remove_legacy_bash_hook_file(hook_path: &Path) -> io::Result<bool> {
+    let legacy_path = legacy_bash_hook_path(hook_path);
+    let content = match fs::read_to_string(&legacy_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+
+    if content.contains("HERDR_INTEGRATION_ID=") {
+        fs::remove_file(legacy_path)?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+#[cfg(not(windows))]
+fn remove_legacy_bash_hook_file(_hook_path: &Path) -> io::Result<bool> {
+    Ok(false)
 }
 
 fn remove_dir_all_if_exists(path: &Path) -> io::Result<bool> {
@@ -2540,10 +2571,7 @@ fn build_kimi_config_with_hooks(content: &str, hook_path: &Path) -> String {
 }
 
 fn kimi_hook_table(event: &str, hook_path: &Path, action: &str) -> String {
-    let command = format!(
-        "bash {} {action}",
-        shell_single_quote(&hook_path.display().to_string())
-    );
+    let command = hook_command(hook_path, Some(action));
     format!(
         "[[hooks]]\nevent = {}\ncommand = {}\ntimeout = 10\n\n",
         toml_basic_string(event),
@@ -2648,6 +2676,49 @@ fn is_toml_key(line: &str, key: &str) -> bool {
 
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn hook_command(hook_path: &Path, action: Option<&str>) -> String {
+    let path = hook_path.display().to_string();
+    #[cfg(windows)]
+    {
+        let mut command = format!(
+            "powershell -NoProfile -ExecutionPolicy Bypass -File {}",
+            windows_command_quote(&path)
+        );
+        if let Some(action) = action {
+            command.push(' ');
+            command.push_str(action);
+        }
+        command
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut command = format!("bash {}", shell_single_quote(&path));
+        if let Some(action) = action {
+            command.push(' ');
+            command.push_str(action);
+        }
+        command
+    }
+}
+
+fn legacy_bash_hook_command(hook_path: &Path, action: Option<&str>) -> String {
+    let mut command = format!(
+        "bash {}",
+        shell_single_quote(&hook_path.display().to_string())
+    );
+    if let Some(action) = action {
+        command.push(' ');
+        command.push_str(action);
+    }
+    command
+}
+
+#[cfg(windows)]
+fn windows_command_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\\\""))
 }
 
 fn make_executable(_path: &Path) -> io::Result<()> {
@@ -2795,10 +2866,7 @@ mod tests {
     }
 
     fn kimi_hook_command(hook_path: &Path, action: &str) -> String {
-        format!(
-            "bash {} {action}",
-            shell_single_quote(&hook_path.display().to_string())
-        )
+        hook_command(hook_path, Some(action))
     }
 
     fn kimi_config_hooks(config: &str) -> Vec<toml::Value> {

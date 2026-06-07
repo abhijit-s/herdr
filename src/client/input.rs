@@ -180,6 +180,15 @@ fn windows_key_raw_bytes(
 
     match key.code {
         KeyCode::Esc if key.modifiers.is_empty() => Some(vec![0x1b]),
+        KeyCode::Char(ch)
+            if !raw_sequence_pending
+                && matches!(ch, 'i' | 'I')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            let mut buf = [0; 4];
+            Some(ch.encode_utf8(&mut buf).as_bytes().to_vec())
+        }
         KeyCode::Char(ch) if raw_sequence_pending || ch.is_control() => {
             let mut bytes = Vec::new();
             if key.modifiers.contains(KeyModifiers::ALT) {
@@ -353,6 +362,24 @@ mod windows_tests {
         assert_eq!(
             crate::input::encode_terminal_key(key, crate::input::KeyboardProtocol::Legacy),
             b"\x04"
+        );
+    }
+
+    #[test]
+    fn windows_pasted_printable_ctrl_i_routes_as_literal_i() {
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
+        assert_eq!(
+            windows_key_raw_bytes(&event, false).as_deref(),
+            Some(b"i".as_slice())
+        );
+
+        let event = Event::Key(KeyEvent::new(
+            KeyCode::Char('I'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+        assert_eq!(
+            windows_key_raw_bytes(&event, false).as_deref(),
+            Some(b"I".as_slice())
         );
     }
 
