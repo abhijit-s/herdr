@@ -151,10 +151,10 @@ fn parse_legacy_special_sequence(data: &str) -> Option<TerminalKey> {
         "\x1bOj" => Some(TerminalKey::new(KeyCode::Char('*'), KeyModifiers::empty())),
         "\x1bOo" => Some(TerminalKey::new(KeyCode::Char('/'), KeyModifiers::empty())),
         "\x1bOM" => Some(TerminalKey::new(KeyCode::Enter, KeyModifiers::empty())),
-        "\x1bOP" => Some(TerminalKey::new(KeyCode::F(1), KeyModifiers::empty())),
-        "\x1bOQ" => Some(TerminalKey::new(KeyCode::F(2), KeyModifiers::empty())),
-        "\x1bOR" => Some(TerminalKey::new(KeyCode::F(3), KeyModifiers::empty())),
-        "\x1bOS" => Some(TerminalKey::new(KeyCode::F(4), KeyModifiers::empty())),
+        "\x1bOP" | "\x1b[11~" => Some(TerminalKey::new(KeyCode::F(1), KeyModifiers::empty())),
+        "\x1bOQ" | "\x1b[12~" => Some(TerminalKey::new(KeyCode::F(2), KeyModifiers::empty())),
+        "\x1bOR" | "\x1b[13~" => Some(TerminalKey::new(KeyCode::F(3), KeyModifiers::empty())),
+        "\x1bOS" | "\x1b[14~" => Some(TerminalKey::new(KeyCode::F(4), KeyModifiers::empty())),
         "\x1b[15~" => Some(TerminalKey::new(KeyCode::F(5), KeyModifiers::empty())),
         "\x1b[17~" => Some(TerminalKey::new(KeyCode::F(6), KeyModifiers::empty())),
         "\x1b[18~" => Some(TerminalKey::new(KeyCode::F(7), KeyModifiers::empty())),
@@ -407,16 +407,60 @@ mod tests {
 
     #[test]
     fn parse_legacy_f_keys() {
+        let cases = [
+            ("\x1bOP", KeyCode::F(1)),
+            ("\x1b[11~", KeyCode::F(1)),
+            ("\x1bOQ", KeyCode::F(2)),
+            ("\x1b[12~", KeyCode::F(2)),
+            ("\x1bOR", KeyCode::F(3)),
+            ("\x1b[13~", KeyCode::F(3)),
+            ("\x1bOS", KeyCode::F(4)),
+            ("\x1b[14~", KeyCode::F(4)),
+        ];
+
+        for (sequence, code) in cases {
+            assert_terminal_key_eq(
+                parse_terminal_key_sequence(sequence).expect("f key should parse"),
+                code,
+                KeyModifiers::empty(),
+                crossterm::event::KeyEventKind::Press,
+                None,
+            );
+        }
+
         assert_terminal_key_eq(
-            parse_terminal_key_sequence("\x1bOP").expect("f1 should parse"),
-            KeyCode::F(1),
+            parse_terminal_key_sequence("\x1b[15~").expect("f5 should parse"),
+            KeyCode::F(5),
+            KeyModifiers::empty(),
+            crossterm::event::KeyEventKind::Press,
+            None,
+        );
+        assert_eq!(parse_terminal_key_sequence("\x1b[10~"), None);
+        assert_eq!(parse_terminal_key_sequence("\x1b[16~"), None);
+        assert_terminal_key_eq(
+            parse_terminal_key_sequence("\x1b[1~").expect("home should parse"),
+            KeyCode::Home,
             KeyModifiers::empty(),
             crossterm::event::KeyEventKind::Press,
             None,
         );
         assert_terminal_key_eq(
-            parse_terminal_key_sequence("\x1b[15~").expect("f5 should parse"),
-            KeyCode::F(5),
+            parse_terminal_key_sequence("\x1b[4~").expect("end should parse"),
+            KeyCode::End,
+            KeyModifiers::empty(),
+            crossterm::event::KeyEventKind::Press,
+            None,
+        );
+        assert_terminal_key_eq(
+            parse_terminal_key_sequence("\x1b[5~").expect("pageup should parse"),
+            KeyCode::PageUp,
+            KeyModifiers::empty(),
+            crossterm::event::KeyEventKind::Press,
+            None,
+        );
+        assert_terminal_key_eq(
+            parse_terminal_key_sequence("\x1b[6~").expect("pagedown should parse"),
+            KeyCode::PageDown,
             KeyModifiers::empty(),
             crossterm::event::KeyEventKind::Press,
             None,
@@ -471,12 +515,29 @@ mod tests {
             None,
         );
         assert_terminal_key_eq(
+            parse_terminal_key_sequence("\x1b[1;3S").expect("alt+f4 should parse"),
+            KeyCode::F(4),
+            KeyModifiers::ALT,
+            crossterm::event::KeyEventKind::Press,
+            None,
+        );
+        assert_terminal_key_eq(
+            parse_terminal_key_sequence("\x1b[1;4S").expect("shift+alt+f4 should parse"),
+            KeyCode::F(4),
+            KeyModifiers::SHIFT | KeyModifiers::ALT,
+            crossterm::event::KeyEventKind::Press,
+            None,
+        );
+        assert_terminal_key_eq(
             parse_terminal_key_sequence("\x1b[15;2~").expect("shift+f5 should parse"),
             KeyCode::F(5),
             KeyModifiers::SHIFT,
             crossterm::event::KeyEventKind::Press,
             None,
         );
+        assert_eq!(parse_terminal_key_sequence("\x1b[11;2~"), None);
+        assert_eq!(parse_terminal_key_sequence("\x1b[14;1~"), None);
+        assert_eq!(parse_terminal_key_sequence("\x1b[14;3~"), None);
     }
 
     #[test]
