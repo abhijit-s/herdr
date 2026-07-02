@@ -312,7 +312,14 @@ impl std::error::Error for ClientError {
 
 impl From<protocol::FramingError> for ClientError {
     fn from(err: protocol::FramingError) -> Self {
-        ClientError::Protocol(err)
+        match err {
+            protocol::FramingError::UnexpectedEof => ClientError::ConnectionLost(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "server closed connection",
+            )),
+            protocol::FramingError::Io(err) => ClientError::ConnectionLost(err),
+            err => ClientError::Protocol(err),
+        }
     }
 }
 
@@ -341,6 +348,7 @@ fn setup_terminal_with_capabilities(
     mouse_capture: bool,
 ) -> io::Result<TerminalGuard> {
     ratatui::init();
+    crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
     let host_color_scheme_reports =
         should_enable_host_color_scheme_reports(enable_client_protocols);
 
@@ -536,6 +544,7 @@ fn restore_windows_input_mode_value(mode: u32) {
 }
 
 fn set_mouse_capture(enabled: bool) -> io::Result<()> {
+    crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
     if enabled {
         execute!(io::stdout(), EnableMouseCapture)
     } else {
@@ -569,6 +578,7 @@ fn restore_terminal_state(
         DisableBracketedPaste,
         DisableMouseCapture
     );
+    let _ = crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout());
     #[cfg(windows)]
     if let Some(mode) = restore_windows_input_mode {
         restore_windows_input_mode_value(mode);
@@ -1100,6 +1110,7 @@ fn run_client_with_mode(
     init_logging();
 
     let loaded_config = crate::config::Config::load();
+    crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
     let mouse_capture = loaded_config.config.ui.mouse_capture;
     let mouse_scroll_lines = loaded_config.config.ui.mouse_scroll_lines();
     let redraw_on_focus_gained = loaded_config.config.ui.redraw_on_focus_gained;
@@ -1283,6 +1294,7 @@ async fn run_client_loop(
         draw_host_cursor,
     };
     debug!(?negotiated_encoding, "client render encoding active");
+    let host_mouse_capture_active = Arc::new(AtomicBool::new(state.mouse_capture_active));
 
     // Channel for events from the stdin, resize, and server reader threads.
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<ClientLoopEvent>(256);
@@ -1292,8 +1304,14 @@ async fn run_client_loop(
         state.attach_escape.is_none() && should_query_host_terminal_theme();
     let stdin_quit = should_quit.clone();
     let stdin_tx = event_tx.clone();
+    let stdin_mouse_capture_active = host_mouse_capture_active.clone();
     std::thread::spawn(move || {
-        input::stdin_reader_loop(stdin_tx, &stdin_quit, will_query_host_terminal_theme);
+        input::stdin_reader_loop(
+            stdin_tx,
+            &stdin_quit,
+            will_query_host_terminal_theme,
+            stdin_mouse_capture_active,
+        );
     });
 
     if will_query_host_terminal_theme {
@@ -1533,6 +1551,7 @@ async fn run_client_loop(
                             let _ = enable_windows_virtual_terminal_input();
                         }
                         state.mouse_capture_active = desired;
+                        host_mouse_capture_active.store(desired, Ordering::Release);
                     }
                 }
                 ServerMessage::Welcome { .. } => {
