@@ -280,6 +280,14 @@ fn encode_graphics_update(
         .collect();
     sources.retain(|source, _| current_sources.contains(source));
 
+    // Host images referenced by any placement in this whole frame. A source
+    // processed earlier must not delete an image that a placement processed
+    // later still points at, even before that later source has been recorded.
+    let frame_host_ids: HashSet<u32> = placements
+        .iter()
+        .map(|placement| host_image_id(placement.pane_id, &placement.placement))
+        .collect();
+
     let mut current_placements = HashSet::new();
     for placement in placements {
         let clipped = clipped_placement(placement);
@@ -308,6 +316,12 @@ fn encode_graphics_update(
         match host_images.get(&host_id).copied() {
             Some(existing) if existing == image_signature => {}
             Some(_) => {
+                // Only delete the stale image once we know its replacement can
+                // be uploaded: an empty-data placement (data filtered out this
+                // frame) would otherwise leave the cells blank.
+                if placement.placement.data.is_empty() {
+                    continue;
+                }
                 encode_delete_image(bytes, host_id);
                 host_placements.retain(|(image_id, placement_id), _| {
                     if *image_id == host_id {
@@ -317,9 +331,7 @@ fn encode_graphics_update(
                         true
                     }
                 });
-                if !encode_upload_image(bytes, placement, format_code, host_id) {
-                    continue;
-                }
+                encode_upload_image(bytes, placement, format_code, host_id);
                 host_images.insert(host_id, image_signature);
             }
             None => {
@@ -336,6 +348,7 @@ fn encode_graphics_update(
             host_images,
             host_placements,
             &mut current_placements,
+            &frame_host_ids,
             (placement.pane_id, placement.placement.image_id),
             host_id,
         );
@@ -389,13 +402,17 @@ fn release_superseded_source_image(
     host_images: &mut HashMap<u32, ImageSignature>,
     host_placements: &mut HashMap<(u32, u32), PlacementSignature>,
     current_placements: &mut HashSet<(u32, u32)>,
+    frame_host_ids: &HashSet<u32>,
     source: (PaneId, u32),
     host_id: u32,
 ) {
     let Some(previous) = sources.insert(source, host_id) else {
         return;
     };
-    if previous == host_id || sources.values().any(|id| *id == previous) {
+    if previous == host_id
+        || sources.values().any(|id| *id == previous)
+        || frame_host_ids.contains(&previous)
+    {
         return;
     }
     encode_delete_image(bytes, previous);
@@ -584,16 +601,58 @@ fn encode_upload_image(
     format_code: u32,
     host_id: u32,
 ) -> bool {
-    if placement.placement.data.is_empty() {
+    let data = &placement.placement.data;
+    if data.is_empty() {
         return false;
     }
 
-    let control = format!(
-        "a=t,t=d,f={format_code},s={},v={},i={host_id},q=2",
-        placement.placement.image_width, placement.placement.image_height,
-    );
-    encode_kitty_data(out, &control, &placement.placement.data);
+    // herdr stores images decoded to raw pixels, so re-emitting them verbatim
+    // inflates a small source (e.g. a ~278 KB PNG) into tens of MB of RGBA that
+    // the outer terminal fails to accept. Re-encode raw pixels back to PNG so
+    // the transmission stays compact, matching the source form the outer
+    // terminal decodes natively. Fall back to raw on any encode failure.
+    let png = match format_code {
+        32 => rgba_to_png(
+            placement.placement.image_width,
+            placement.placement.image_height,
+            data,
+            png::ColorType::Rgba,
+        ),
+        24 => rgba_to_png(
+            placement.placement.image_width,
+            placement.placement.image_height,
+            data,
+            png::ColorType::Rgb,
+        ),
+        _ => None,
+    };
+
+    if let Some(png_bytes) = png {
+        let control = format!("a=t,t=d,f=100,i={host_id},q=2");
+        encode_kitty_data(out, &control, &png_bytes);
+    } else {
+        let control = format!(
+            "a=t,t=d,f={format_code},s={},v={},i={host_id},q=2",
+            placement.placement.image_width, placement.placement.image_height,
+        );
+        encode_kitty_data(out, &control, data);
+    }
     true
+}
+
+fn rgba_to_png(width: u32, height: u32, pixels: &[u8], color: png::ColorType) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(color);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(pixels).ok()?;
+    }
+    Some(out)
 }
 
 fn encode_display_placement(
@@ -886,6 +945,38 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn encode_upload_image_reencodes_rgba_as_png() {
+        // A large, uniform RGBA source: raw is width*height*4 bytes. Re-encoding
+        // to PNG must emit an f=100 upload whose payload is far smaller than the
+        // raw pixels (the whole point of the fix), and must omit the raw-only
+        // s=/v= dimension keys.
+        let mut placement = test_placement(0, 0);
+        placement.placement.image_width = 512;
+        placement.placement.image_height = 512;
+        placement.placement.format = KittyImageFormat::Rgba;
+        placement.placement.data = vec![200u8; 512 * 512 * 4];
+        placement.placement.data_len = 512 * 512 * 4;
+
+        let mut out = Vec::new();
+        let emitted = encode_upload_image(&mut out, &placement, 32, 12345);
+        assert!(emitted, "non-empty data must emit an upload");
+
+        let text = String::from_utf8_lossy(&out);
+        assert!(text.contains("a=t,t=d,f=100,i=12345"), "must upload as PNG (f=100)");
+        assert!(!text.contains("f=32"), "must not upload raw RGBA");
+        assert!(!text.contains(",s=512"), "PNG upload omits raw s= dimension");
+
+        // Base64 payload of the re-encoded PNG must be dramatically smaller than
+        // base64 of the raw pixels (512*512*4 bytes -> ~1.4 MB base64).
+        assert!(
+            out.len() < 512 * 512 * 4 / 10,
+            "PNG upload ({} bytes) should be far smaller than raw ({} bytes)",
+            out.len(),
+            512 * 512 * 4,
+        );
     }
 
     #[test]
@@ -1275,6 +1366,75 @@ mod tests {
         );
         assert_eq!(images.len(), 1);
         assert_eq!(sources.len(), 1);
+    }
+
+    #[test]
+    fn superseded_image_survives_when_later_placement_adopts_it_same_frame() {
+        // Two sources share one pane. Source 7 shows content A; source 8 shows
+        // content C. Next frame source 7 moves to fresh content B (processed
+        // first, superseding the image it leaves behind) while source 8 moves
+        // to content A. Source 8 is processed second and its data was filtered
+        // empty because A is already uploaded. The host image backing A must
+        // not be deleted mid-frame: a later placement in the same frame still
+        // references it.
+        fn placement(
+            image_id: u32,
+            placement_id: u32,
+            fingerprint: u64,
+            viewport: i32,
+        ) -> HostPlacement {
+            let mut p = test_placement(viewport, viewport);
+            p.placement.image_id = image_id;
+            p.placement.placement_id = placement_id;
+            p.placement.data_fingerprint = fingerprint;
+            p
+        }
+
+        let mut images = HashMap::new();
+        let mut placements = HashMap::new();
+        let mut sources = HashMap::new();
+        let mut bytes = Vec::new();
+
+        encode_graphics_update(
+            &mut bytes,
+            &[placement(7, 3, 42, 0), placement(8, 4, 99, 5)],
+            false,
+            &mut images,
+            &mut placements,
+            &mut sources,
+        );
+        assert_eq!(images.len(), 2);
+        let host_id_a = host_image_id(PaneId::from_raw(1), &placement(7, 3, 42, 0).placement);
+
+        // Source 7 changes to content B (fresh data). Source 8 changes to
+        // content A, but its data is filtered empty because A was uploaded in
+        // the previous frame.
+        bytes.clear();
+        let mut source8_to_a = placement(8, 4, 42, 5);
+        source8_to_a.placement.data.clear();
+        encode_graphics_update(
+            &mut bytes,
+            &[placement(7, 3, 43, 0), source8_to_a],
+            false,
+            &mut images,
+            &mut placements,
+            &mut sources,
+        );
+
+        let update = String::from_utf8_lossy(&bytes);
+        assert!(
+            !update.contains(&format!("a=d,d=I,i={host_id_a}")),
+            "an image still referenced by another source this frame must not be deleted"
+        );
+        assert!(
+            update.contains(&format!("a=p,i={host_id_a}")),
+            "the surviving image is redisplayed for its new source"
+        );
+        assert!(
+            images.contains_key(&host_id_a),
+            "the surviving image stays uploaded"
+        );
+        assert_eq!(images.len(), 2);
     }
 
     #[test]
