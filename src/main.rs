@@ -257,10 +257,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # status_right is the format string: literal text, a %-strftime subset
 # (%H %M %S %d %b %Y %%), and #(command) segments whose stdout becomes text.
 # Simple single-line tmux scripts like #(cpu.sh) or #(gitmux) work as-is.
+# tmux-style #[...] directives style following segments: fg=<color>, bg=<color>,
+# bold/dim/italic/underline/reverse, and default/none to reset. <color> is a
+# name, hex (#1e1e2e), or rgb(r,g,b) — the same parser as `accent`.
 # Empty (the default) hides the strip. status_right_length is the reserved
 # column budget; status_interval is the #(command) refresh cadence in seconds.
 # [ui.status]
-# status_right = "#(gitmux) │ CPU #(cpu.sh)% │ %H:%M"
+# status_right = "#[fg=green]#(gitmux)#[default] │ CPU #(cpu.sh)% │ %H:%M"
 # status_right_length = 28
 # status_interval = 5
 

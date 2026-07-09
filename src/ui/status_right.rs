@@ -10,7 +10,10 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use ratatui::style::{Color, Modifier, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+use crate::config::parse_color_opt;
 
 /// Upper bound on characters kept from a `#(command)` line before display-width
 /// budgeting. Mirrors the length cap in `normalize_custom_status`.
@@ -18,6 +21,92 @@ const MAX_SEGMENT_CHARS: usize = 256;
 
 /// Ellipsis appended when a lone oversize segment is truncated (KTD4).
 const ELLIPSIS: char = '…';
+
+/// A tmux-style `#[…]` style directive: the fg/bg/modifiers it sets for the
+/// segments that follow it, plus a `reset` flag for `#[default]`/`#[none]`.
+/// Zero display width (KTD4). Colors come only from the trusted format string
+/// (KTD1); `#(command)` output stays sanitized plain text.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct StyleSpec {
+    pub fg: Option<Color>,
+    pub bg: Option<Color>,
+    pub add_modifier: Modifier,
+    /// `#[default]`/`#[none]`: reset the current style back to the strip base.
+    pub reset: bool,
+}
+
+impl StyleSpec {
+    /// Fold this directive onto the current style (KTD3, stateful): `reset`
+    /// snaps back to `base`, then fg/bg/modifiers layer on top cumulatively.
+    fn apply(&self, base: Style, current: Style) -> Style {
+        let mut next = if self.reset { base } else { current };
+        if let Some(fg) = self.fg {
+            next = next.fg(fg);
+        }
+        if let Some(bg) = self.bg {
+            next = next.bg(bg);
+        }
+        next.add_modifier(self.add_modifier)
+    }
+}
+
+/// Split a `#[…]` body on attribute commas, but not on commas inside a
+/// parenthesized color value such as `rgb(1,2,3)`.
+fn split_style_attrs(inner: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut buf = String::new();
+    let mut depth = 0i32;
+    for c in inner.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                buf.push(c);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                buf.push(c);
+            }
+            ',' if depth == 0 => tokens.push(std::mem::take(&mut buf)),
+            _ => buf.push(c),
+        }
+    }
+    tokens.push(buf);
+    tokens
+}
+
+/// Parse the inside of a `#[…]` directive into a [`StyleSpec`]. Attributes are
+/// comma-separated (commas inside `rgb(…)` are preserved); unknown keys and
+/// unparseable colors are ignored (KTD4, graceful degrade) rather than erroring.
+fn parse_style_spec(inner: &str) -> StyleSpec {
+    let mut spec = StyleSpec::default();
+    for token in split_style_attrs(inner) {
+        let token = token.trim().to_ascii_lowercase();
+        if token.is_empty() {
+            continue;
+        }
+        match token.as_str() {
+            "default" | "none" => spec.reset = true,
+            "bold" => spec.add_modifier |= Modifier::BOLD,
+            "dim" => spec.add_modifier |= Modifier::DIM,
+            "italic" => spec.add_modifier |= Modifier::ITALIC,
+            "underline" => spec.add_modifier |= Modifier::UNDERLINED,
+            "reverse" => spec.add_modifier |= Modifier::REVERSED,
+            _ => {
+                if let Some(value) = token.strip_prefix("fg=") {
+                    if let Some(color) = parse_color_opt(value) {
+                        spec.fg = Some(color);
+                    }
+                } else if let Some(value) = token.strip_prefix("bg=") {
+                    if let Some(color) = parse_color_opt(value) {
+                        spec.bg = Some(color);
+                    }
+                }
+                // Unknown attribute: ignored.
+            }
+        }
+    }
+    spec
+}
 
 /// One parsed piece of a `status_right` format string.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +117,8 @@ pub(crate) enum Segment {
     Clock(String),
     /// A `#(command)` whose stdout becomes the segment text.
     Command(String),
+    /// A `#[…]` style directive; contributes no text and no display width.
+    Style(StyleSpec),
 }
 
 /// Whether a resolved segment carries content or is a droppable separator.
@@ -37,11 +128,15 @@ pub(crate) enum SegmentKind {
     Content,
 }
 
-/// A segment resolved to its current display string.
+/// A segment resolved to its current display string plus the ratatui [`Style`]
+/// captured at its original position in the directive stream (KTD3). Capturing
+/// per-segment makes truncation style-safe: dropping leftmost segments never
+/// leaks a style onto a survivor (R4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResolvedSegment {
     pub kind: SegmentKind,
     pub text: String,
+    pub style: Style,
 }
 
 fn is_clock_specifier(c: char) -> bool {
@@ -79,6 +174,20 @@ pub(crate) fn parse_status_right(input: &str) -> Vec<Segment> {
                 continue;
             }
             // Unclosed `#(` degrades to literal text.
+            literal.push('#');
+            i += 1;
+            continue;
+        }
+
+        if c == '#' && chars.get(i + 1) == Some(&'[') {
+            if let Some(close) = (i + 2..chars.len()).find(|&j| chars[j] == ']') {
+                flush(&mut literal, &mut segments);
+                let inner: String = chars[i + 2..close].iter().collect();
+                segments.push(Segment::Style(parse_style_spec(&inner)));
+                i = close + 1;
+                continue;
+            }
+            // Unclosed `#[` degrades to literal text (mirrors `#(` handling).
             literal.push('#');
             i += 1;
             continue;
@@ -257,16 +366,19 @@ fn truncate_to_columns(text: &str, budget: usize) -> String {
     out
 }
 
+/// Concatenate resolved segment text (ignoring style) — the display string and
+/// width basis for the strip.
+pub(crate) fn joined(segs: &[ResolvedSegment]) -> String {
+    segs.iter().map(|s| s.text.as_str()).collect()
+}
+
 /// Fit resolved segments into `budget` display columns (KTD4): drop whole
 /// segments leftmost-first (also dropping the now-leading separator) until they
-/// fit; if a single surviving segment still overflows, truncate it with `…`.
-pub(crate) fn fit_segments(resolved: &[ResolvedSegment], budget: usize) -> String {
-    let joined = |segs: &[ResolvedSegment]| -> String {
-        segs.iter().map(|s| s.text.as_str()).collect::<String>()
-    };
-
+/// fit; if a single surviving segment still overflows, truncate its text with
+/// `…`. Each survivor keeps the [`Style`] it was resolved with (R4).
+pub(crate) fn fit_segments(resolved: &[ResolvedSegment], budget: usize) -> Vec<ResolvedSegment> {
     if display_width(&joined(resolved)) <= budget {
-        return joined(resolved);
+        return resolved.to_vec();
     }
 
     let mut remaining: Vec<ResolvedSegment> = resolved.to_vec();
@@ -278,12 +390,43 @@ pub(crate) fn fit_segments(resolved: &[ResolvedSegment], budget: usize) -> Strin
         }
     }
 
-    let line = joined(&remaining);
-    if display_width(&line) > budget {
+    if display_width(&joined(&remaining)) > budget {
         // Lone oversize segment: the sole allowed mid-character truncation.
-        return truncate_to_columns(&line, budget);
+        // Truncate its text but preserve its captured style/kind.
+        if let Some(first) = remaining.first_mut() {
+            first.text = truncate_to_columns(&first.text, budget);
+        }
     }
-    line
+    remaining
+}
+
+/// Drop segments that resolved to empty content, along with one adjacent
+/// separator literal, so an empty `#(command)`/clock leaves no dangling ` │ `
+/// (R5). Prefers dropping the following separator; falls back to the preceding
+/// one for a trailing empty segment.
+fn drop_empty_segments(segs: Vec<ResolvedSegment>) -> Vec<ResolvedSegment> {
+    let mut out: Vec<ResolvedSegment> = Vec::with_capacity(segs.len());
+    let mut i = 0;
+    while i < segs.len() {
+        let seg = &segs[i];
+        if seg.kind == SegmentKind::Content && seg.text.is_empty() {
+            if segs
+                .get(i + 1)
+                .is_some_and(|s| s.kind == SegmentKind::Literal)
+            {
+                i += 2; // Drop the empty segment and its following separator.
+            } else {
+                if out.last().is_some_and(|s| s.kind == SegmentKind::Literal) {
+                    out.pop(); // Trailing empty: drop the preceding separator.
+                }
+                i += 1;
+            }
+            continue;
+        }
+        out.push(seg.clone());
+        i += 1;
+    }
+    out
 }
 
 /// Per-`#(command)` scheduling and last-known value. Pure data on `AppState`;
@@ -426,39 +569,61 @@ impl StatusStripState {
         }
     }
 
-    fn resolve(&self) -> Vec<ResolvedSegment> {
-        self.segments
-            .iter()
-            .map(|seg| match seg {
-                Segment::Literal(text) => ResolvedSegment {
+    /// Resolve segments to their display text, walking the `#[…]` directive
+    /// stream left-to-right and capturing the effective [`Style`] at each
+    /// content/literal position (KTD3). Style directives contribute no output.
+    fn resolve(&self, base: Style) -> Vec<ResolvedSegment> {
+        let mut current = base;
+        let mut out = Vec::with_capacity(self.segments.len());
+        for seg in &self.segments {
+            match seg {
+                Segment::Style(spec) => current = spec.apply(base, current),
+                Segment::Literal(text) => out.push(ResolvedSegment {
                     kind: SegmentKind::Literal,
                     text: text.clone(),
-                },
-                Segment::Clock(fmt) => ResolvedSegment {
+                    style: current,
+                }),
+                Segment::Clock(fmt) => out.push(ResolvedSegment {
                     kind: SegmentKind::Content,
                     text: self.clock_texts.get(fmt).cloned().unwrap_or_default(),
-                },
-                Segment::Command(cmd) => ResolvedSegment {
+                    style: current,
+                }),
+                Segment::Command(cmd) => out.push(ResolvedSegment {
                     kind: SegmentKind::Content,
                     text: self
                         .commands
                         .get(cmd)
                         .and_then(|slot| slot.last_value.clone())
                         .unwrap_or_default(),
-                },
-            })
-            .collect()
+                    style: current,
+                }),
+            }
+        }
+        out
     }
 
-    /// Compose the fitted strip line for the given available width. Pure: reads
-    /// only cached values (no clock sampling, no spawning) so it is safe to call
-    /// from `compute_view`/`render` (KTD6).
-    pub(crate) fn render_line(&self, available_width: usize) -> String {
+    /// Compose the fitted, styled strip segments for the given available width,
+    /// relative to `base` (the strip's default style; `#[default]` resets to
+    /// it). Empty-resolved content drops its adjacent separator (R5). Pure:
+    /// reads only cached values (no clock sampling, no spawning) so it is safe
+    /// to call from `compute_view`/`render` (KTD6).
+    pub(crate) fn render_segments(
+        &self,
+        available_width: usize,
+        base: Style,
+    ) -> Vec<ResolvedSegment> {
         if !self.is_enabled() {
-            return String::new();
+            return Vec::new();
         }
         let budget = self.budget.min(available_width);
-        fit_segments(&self.resolve(), budget)
+        let resolved = drop_empty_segments(self.resolve(base));
+        fit_segments(&resolved, budget)
+    }
+
+    /// Compose the fitted strip line as plain text (style-agnostic), used for
+    /// width budgeting. Delegates to [`Self::render_segments`].
+    pub(crate) fn render_line(&self, available_width: usize) -> String {
+        joined(&self.render_segments(available_width, Style::default()))
     }
 }
 
@@ -502,6 +667,7 @@ mod tests {
         ResolvedSegment {
             kind: SegmentKind::Content,
             text: text.to_string(),
+            style: Style::default(),
         }
     }
 
@@ -509,7 +675,24 @@ mod tests {
         ResolvedSegment {
             kind: SegmentKind::Literal,
             text: text.to_string(),
+            style: Style::default(),
         }
+    }
+
+    fn styled_content(text: &str, style: Style) -> ResolvedSegment {
+        ResolvedSegment {
+            kind: SegmentKind::Content,
+            text: text.to_string(),
+            style,
+        }
+    }
+
+    fn build(status_right: &str) -> StatusStripState {
+        StatusStripState::from_config(&crate::config::StatusConfig {
+            status_right: status_right.into(),
+            status_right_length: 40,
+            status_interval: 5,
+        })
     }
 
     // --- U2: parser -------------------------------------------------------
@@ -665,14 +848,14 @@ mod tests {
     #[test]
     fn fit_keeps_all_when_within_budget() {
         let segs = vec![content("main"), sep(" │ "), content("09:04")];
-        assert_eq!(fit_segments(&segs, 40), "main │ 09:04");
+        assert_eq!(joined(&fit_segments(&segs, 40)), "main │ 09:04");
     }
 
     #[test]
     fn fit_drops_leftmost_segment_and_adjacent_separator() {
         let segs = vec![content("main"), sep(" │ "), content("09:04")];
         // Budget fits only "09:04": drop "main" AND the dangling " │ ".
-        assert_eq!(fit_segments(&segs, 6), "09:04");
+        assert_eq!(joined(&fit_segments(&segs, 6)), "09:04");
     }
 
     #[test]
@@ -684,13 +867,13 @@ mod tests {
             sep(" │ "),
             content("cc"),
         ];
-        assert_eq!(fit_segments(&segs, 3), "cc");
+        assert_eq!(joined(&fit_segments(&segs, 3)), "cc");
     }
 
     #[test]
     fn fit_truncates_lone_oversize_segment_with_ellipsis() {
         let segs = vec![content("2026-07-09")];
-        let out = fit_segments(&segs, 5);
+        let out = joined(&fit_segments(&segs, 5));
         assert!(out.ends_with('…'), "out: {out:?}");
         assert!(display_width(&out) <= 5, "out width: {out:?}");
     }
@@ -700,7 +883,7 @@ mod tests {
         // Each CJK glyph is 2 columns; four glyphs = 8 columns.
         let segs = vec![content("提交反馈")];
         assert_eq!(display_width("提交反馈"), 8);
-        let out = fit_segments(&segs, 5);
+        let out = joined(&fit_segments(&segs, 5));
         // Truncated by display columns (with the ellipsis) rather than chars.
         assert!(
             display_width(&out) <= 5,
@@ -792,5 +975,160 @@ mod tests {
             strip.due_commands(now + Duration::from_secs(1)),
             vec!["cpu.sh".to_string()]
         );
+    }
+
+    // --- U1: `#[…]` directive parsing ------------------------------------
+
+    #[test]
+    fn parses_single_fg_directive() {
+        assert_eq!(
+            parse_status_right("#[fg=green]"),
+            vec![Segment::Style(StyleSpec {
+                fg: Some(Color::Green),
+                ..Default::default()
+            })]
+        );
+    }
+
+    #[test]
+    fn parses_combined_fg_bg_bold_directive() {
+        let spec = parse_style_spec("fg=black,bg=#1e1e2e,bold");
+        assert_eq!(spec.fg, Some(Color::Black));
+        assert_eq!(spec.bg, Some(Color::Rgb(0x1e, 0x1e, 0x2e)));
+        assert!(spec.add_modifier.contains(Modifier::BOLD));
+        assert!(!spec.reset);
+    }
+
+    #[test]
+    fn default_and_none_directives_are_reset() {
+        assert!(parse_style_spec("default").reset);
+        assert!(parse_style_spec("none").reset);
+    }
+
+    #[test]
+    fn unknown_attr_and_bad_color_are_ignored() {
+        let spec = parse_style_spec("wat=1,fg=notacolor,bold");
+        assert_eq!(spec.fg, None);
+        assert_eq!(spec.bg, None);
+        assert!(spec.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn unclosed_style_bracket_degrades_to_literal() {
+        assert_eq!(
+            parse_status_right("#[fg=green"),
+            vec![Segment::Literal("#[fg=green".into())]
+        );
+    }
+
+    #[test]
+    fn style_directives_contribute_zero_resolved_segments() {
+        let strip = build("#[fg=green]#[bold]");
+        assert!(strip.resolve(Style::default()).is_empty());
+        assert_eq!(strip.render_line(40), "");
+    }
+
+    // --- U2: style resolution -> ratatui `Style` --------------------------
+
+    #[test]
+    fn directive_maps_to_ratatui_style() {
+        let spec = parse_style_spec("fg=green,bg=blue,underline");
+        let base = Style::default();
+        let out = spec.apply(base, base);
+        assert_eq!(out.fg, Some(Color::Green));
+        assert_eq!(out.bg, Some(Color::Blue));
+        assert!(out.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn segment_captures_current_style_and_default_resets_to_base() {
+        let base = Style::default().fg(Color::White);
+        let strip = build("#[fg=green]hi#[default]bye");
+        let segs = strip.resolve(base);
+        assert_eq!(segs[0].text, "hi");
+        assert_eq!(segs[0].style.fg, Some(Color::Green));
+        assert_eq!(segs[1].text, "bye");
+        assert_eq!(segs[1].style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn truncation_preserves_survivor_style() {
+        let a = styled_content("aaaa", Style::default().fg(Color::Red));
+        let separator = sep(" │ ");
+        let b = styled_content("bbbb", Style::default().fg(Color::Blue));
+        let full = fit_segments(&[a.clone(), separator.clone(), b.clone()], 100);
+        let dropped = fit_segments(&[a, separator, b], 4);
+        // The rightmost survivor keeps its blue fg whether or not the leftmost
+        // was dropped during truncation.
+        assert_eq!(full.last().unwrap().style.fg, Some(Color::Blue));
+        assert_eq!(dropped.last().unwrap().text, "bbbb");
+        assert_eq!(dropped.last().unwrap().style.fg, Some(Color::Blue));
+    }
+
+    #[test]
+    fn named_hex_and_rgb_colors_all_resolve() {
+        assert_eq!(parse_style_spec("fg=green").fg, Some(Color::Green));
+        assert_eq!(
+            parse_style_spec("fg=#ff0000").fg,
+            Some(Color::Rgb(255, 0, 0))
+        );
+        assert_eq!(
+            parse_style_spec("fg=rgb(1,2,3)").fg,
+            Some(Color::Rgb(1, 2, 3))
+        );
+    }
+
+    // --- U3: styled draw + empty-separator drop ---------------------------
+
+    #[test]
+    fn empty_leading_command_drops_following_separator() {
+        let mut strip = build("#(git) │ %H:%M");
+        strip.refresh_clock(&fixed_time());
+        // git never produced output → empty → its trailing separator drops.
+        assert_eq!(strip.render_line(40), "09:04");
+    }
+
+    #[test]
+    fn empty_trailing_command_drops_preceding_separator() {
+        let mut strip = build("%H:%M │ #(git)");
+        strip.refresh_clock(&fixed_time());
+        assert_eq!(strip.render_line(40), "09:04");
+    }
+
+    #[test]
+    fn nonempty_neighbor_keeps_its_separator() {
+        let mut strip = build("#(git) │ %H:%M");
+        strip.apply_command_result("git", Ok("main".into()));
+        strip.refresh_clock(&fixed_time());
+        assert_eq!(strip.render_line(40), "main │ 09:04");
+    }
+
+    #[test]
+    fn styles_do_not_change_display_width() {
+        let styled = build("#[fg=green,bg=blue]abc#[default] │ #[bold]xy");
+        let plain = build("abc │ xy");
+        assert_eq!(styled.render_line(40), plain.render_line(40));
+        assert_eq!(
+            display_width(&styled.render_line(40)),
+            display_width(&plain.render_line(40))
+        );
+    }
+
+    #[test]
+    fn powerline_example_composes_without_width_drift() {
+        let styled = build("#[fg=black,bg=green] A #[fg=green,bg=blue] B ");
+        let plain = build(" A  B ");
+        assert_eq!(styled.render_line(40), plain.render_line(40));
+    }
+
+    #[test]
+    fn styled_content_segment_carries_resolved_style() {
+        let base = Style::default().fg(Color::White).bg(Color::Black);
+        let strip = build("#[fg=red,bg=green]HI");
+        let segs = strip.render_segments(40, base);
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "HI");
+        assert_eq!(segs[0].style.fg, Some(Color::Red));
+        assert_eq!(segs[0].style.bg, Some(Color::Green));
     }
 }

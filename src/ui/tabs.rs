@@ -1,6 +1,7 @@
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Modifier, Style},
+    text::{Line, Span},
     widgets::Paragraph,
     Frame,
 };
@@ -403,15 +404,20 @@ fn render_status_strip(app: &AppState, frame: &mut Frame) {
     if rect.width == 0 || rect.height == 0 {
         return;
     }
-    let text = app.status_strip.render_line(rect.width as usize);
-    if text.is_empty() {
+    let p = &app.palette;
+    let base = Style::default().fg(p.overlay1).bg(p.panel_bg);
+    let segments = app.status_strip.render_segments(rect.width as usize, base);
+    if segments.is_empty() {
         return;
     }
-    let p = &app.palette;
+    let spans: Vec<Span> = segments
+        .into_iter()
+        .map(|seg| Span::styled(seg.text, seg.style))
+        .collect();
     frame.render_widget(
-        Paragraph::new(text)
+        Paragraph::new(Line::from(spans))
             .alignment(Alignment::Right)
-            .style(Style::default().fg(p.overlay1).bg(p.panel_bg)),
+            .style(base),
         rect,
     );
 }
@@ -555,5 +561,36 @@ mod tests {
 
         let row = buffer_row_text(terminal.backend().buffer(), app.view.tab_bar_rect, 0);
         assert!(row.contains('馈'), "tab row: {row:?}");
+    }
+
+    #[test]
+    fn status_strip_applies_style_directives() {
+        use ratatui::style::Color;
+
+        let mut app = AppState::test_new();
+        let ws = Workspace::test_new("test");
+        app.active = Some(0);
+        app.workspaces = vec![ws];
+        app.status_strip =
+            crate::ui::status_right::StatusStripState::from_config(&crate::config::StatusConfig {
+                status_right: "#[fg=red]HI".into(),
+                status_right_length: 20,
+                status_interval: 5,
+            });
+        app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
+        app.view.status_strip_rect = Rect::new(25, 0, 5, 1);
+
+        let backend = TestBackend::new(30, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+            .unwrap();
+
+        // "HI" is right-aligned within the 5-wide strip rect (cols 28-29).
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(28, 0)].symbol(), "H");
+        assert_eq!(buffer[(28, 0)].style().fg, Some(Color::Red));
+        assert_eq!(buffer[(29, 0)].symbol(), "I");
+        assert_eq!(buffer[(29, 0)].style().fg, Some(Color::Red));
     }
 }
