@@ -170,6 +170,10 @@ pub(crate) enum Segment {
     Clock(String),
     /// A `#(command)` whose stdout becomes the segment text.
     Command(String),
+    /// A `#{slot:NAME}` push slot whose text is the latest value pushed for
+    /// `NAME` over the API socket (the push lane, KTD1). Empty when unset or
+    /// expired, so it drops its adjacent separator like an empty command (R3).
+    Slot(String),
     /// A `#[…]` style directive; contributes no text and no display width.
     Style(StyleSpec),
 }
@@ -241,6 +245,24 @@ pub(crate) fn parse_status_right(input: &str) -> Vec<Segment> {
                 continue;
             }
             // Unclosed `#[` degrades to literal text (mirrors `#(` handling).
+            literal.push('#');
+            i += 1;
+            continue;
+        }
+
+        if c == '#' && chars.get(i + 1) == Some(&'{') {
+            if let Some(close) = (i + 2..chars.len()).find(|&j| chars[j] == '}') {
+                let inner: String = chars[i + 2..close].iter().collect();
+                // Only `#{slot:NAME}` is recognized; any other `#{…}` body
+                // degrades to literal so the token space stays reserved (KTD1).
+                if let Some(name) = inner.strip_prefix("slot:") {
+                    flush(&mut literal, &mut segments);
+                    segments.push(Segment::Slot(name.to_string()));
+                    i = close + 1;
+                    continue;
+                }
+            }
+            // Unclosed or unrecognized `#{` degrades to literal text.
             literal.push('#');
             i += 1;
             continue;
@@ -491,6 +513,111 @@ pub(crate) struct CommandSlot {
     pub in_flight: bool,
 }
 
+/// One pushed slot value: the sanitized text, when it was reported, and an
+/// optional TTL evaluated lazily at read time (KTD4).
+#[derive(Debug, Clone)]
+struct Slot {
+    text: String,
+    reported_at: Instant,
+    ttl: Option<Duration>,
+}
+
+impl Slot {
+    fn is_expired(&self, now: Instant) -> bool {
+        self.ttl.is_some_and(|ttl| {
+            let deadline = self
+                .reported_at
+                .checked_add(ttl)
+                .unwrap_or(self.reported_at);
+            now >= deadline
+        })
+    }
+}
+
+/// Host-scoped store for the push lane: source-keyed status values written over
+/// the API socket and rendered wherever a matching `#{slot:NAME}` token appears
+/// (KTD2). Modeled on `AgentMetadata`'s seq/ttl rules but host-scoped (keyed by
+/// `source` only) with no pane-id key and no agent-lifecycle guard — the strip
+/// is chrome, not agent state. Lives on `AppState`, separate from
+/// `StatusStripState`, so it survives a config reload.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SlotStore {
+    slots: HashMap<String, Slot>,
+    /// Last accepted `seq` per source for last-writer-wins (mirrors
+    /// `AgentMetadata`'s `metadata_report_sequences`).
+    seqs: HashMap<String, u64>,
+}
+
+impl SlotStore {
+    /// Accept a report only when its `seq` advances the last seen one for the
+    /// source. A `None` seq is always accepted (unsequenced writers).
+    fn accept_seq(&mut self, source: &str, seq: Option<u64>) -> bool {
+        let Some(seq) = seq else {
+            return true;
+        };
+        if self.seqs.get(source).is_some_and(|last| seq <= *last) {
+            return false;
+        }
+        self.seqs.insert(source.to_string(), seq);
+        true
+    }
+
+    /// Set the value for `source`. Returns whether the currently displayed
+    /// value changed (so the caller can decide whether to repaint). An older or
+    /// equal `seq` is ignored and returns `false`.
+    pub(crate) fn set(
+        &mut self,
+        source: String,
+        text: String,
+        seq: Option<u64>,
+        ttl: Option<Duration>,
+        now: Instant,
+    ) -> bool {
+        if !self.accept_seq(&source, seq) {
+            return false;
+        }
+        let previous = self.get(&source, now).map(str::to_string);
+        self.slots.insert(
+            source,
+            Slot {
+                text: text.clone(),
+                reported_at: now,
+                ttl,
+            },
+        );
+        previous.as_deref() != Some(text.as_str())
+    }
+
+    /// Remove the value for `source`. Returns whether a visible value was
+    /// dropped (so the caller can decide whether to repaint). Also clears the
+    /// seq watermark so a fresh writer starts clean.
+    pub(crate) fn clear(&mut self, source: &str, now: Instant) -> bool {
+        let was_visible = self.get(source, now).is_some();
+        self.slots.remove(source);
+        self.seqs.remove(source);
+        was_visible
+    }
+
+    /// Current value for `source`, or `None` when unset or expired (lazy TTL).
+    fn get(&self, source: &str, now: Instant) -> Option<&str> {
+        self.slots
+            .get(source)
+            .filter(|slot| !slot.is_expired(now))
+            .map(|slot| slot.text.as_str())
+    }
+
+    /// Resolve a slot to its display text (empty when unset or expired).
+    fn resolve(&self, name: &str, now: Instant) -> String {
+        self.get(name, now).unwrap_or_default().to_string()
+    }
+
+    /// Current value for a source at "now", for handler tests.
+    #[cfg(test)]
+    pub(crate) fn get_for_test(&self, source: &str) -> Option<String> {
+        self.get(source, Instant::now()).map(str::to_string)
+    }
+}
+
 /// Parsed strip config plus resolved caches. Lives on `AppState`; updated only
 /// on the interval tick (clock sampling, command completions), read by
 /// `compute_view`/`render`.
@@ -625,7 +752,13 @@ impl StatusStripState {
     /// Resolve segments to their display text, walking the `#[…]` directive
     /// stream left-to-right and capturing the effective [`Style`] at each
     /// content/literal position (KTD3). Style directives contribute no output.
-    fn resolve(&self, base: Style, palette: Option<&Palette>) -> Vec<ResolvedSegment> {
+    fn resolve(
+        &self,
+        base: Style,
+        palette: Option<&Palette>,
+        slots: &SlotStore,
+        now: Instant,
+    ) -> Vec<ResolvedSegment> {
         let mut current = base;
         let mut out = Vec::with_capacity(self.segments.len());
         for seg in &self.segments {
@@ -650,6 +783,11 @@ impl StatusStripState {
                         .unwrap_or_default(),
                     style: current,
                 }),
+                Segment::Slot(name) => out.push(ResolvedSegment {
+                    kind: SegmentKind::Content,
+                    text: slots.resolve(name, now),
+                    style: current,
+                }),
             }
         }
         out
@@ -665,20 +803,37 @@ impl StatusStripState {
         available_width: usize,
         base: Style,
         palette: Option<&Palette>,
+        slots: &SlotStore,
     ) -> Vec<ResolvedSegment> {
         if !self.is_enabled() {
             return Vec::new();
         }
+        // Sample the monotonic clock once so slot TTLs expire lazily at compose
+        // time (KTD4). This reads the clock but performs no mutation/spawn, so
+        // it stays safe to call from `compute_view`/`render` (KTD6).
+        let now = Instant::now();
         let budget = self.budget.min(available_width);
-        let resolved = drop_empty_segments(self.resolve(base, palette));
+        let resolved = drop_empty_segments(self.resolve(base, palette, slots, now));
         fit_segments(&resolved, budget)
     }
 
-    /// Compose the fitted strip line as plain text (style-agnostic), used for
-    /// width budgeting. Delegates to [`Self::render_segments`]; colors never
-    /// affect segment text/width, so no palette is needed here.
+    /// Compose the fitted strip line as plain text (style-agnostic) including
+    /// pushed slot values, used for width budgeting. Delegates to
+    /// [`Self::render_segments`]; colors never affect segment text/width, so no
+    /// palette is needed here.
+    pub(crate) fn render_line_with_slots(
+        &self,
+        available_width: usize,
+        slots: &SlotStore,
+    ) -> String {
+        joined(&self.render_segments(available_width, Style::default(), None, slots))
+    }
+
+    /// Compose the fitted strip line as plain text with no pushed slots. Used by
+    /// tests that exercise commands/clock/styling without the push lane.
+    #[cfg(test)]
     pub(crate) fn render_line(&self, available_width: usize) -> String {
-        joined(&self.render_segments(available_width, Style::default(), None))
+        self.render_line_with_slots(available_width, &SlotStore::default())
     }
 }
 
@@ -1079,7 +1234,14 @@ mod tests {
     #[test]
     fn style_directives_contribute_zero_resolved_segments() {
         let strip = build("#[fg=green]#[bold]");
-        assert!(strip.resolve(Style::default(), None).is_empty());
+        assert!(strip
+            .resolve(
+                Style::default(),
+                None,
+                &SlotStore::default(),
+                Instant::now()
+            )
+            .is_empty());
         assert_eq!(strip.render_line(40), "");
     }
 
@@ -1099,7 +1261,7 @@ mod tests {
     fn segment_captures_current_style_and_default_resets_to_base() {
         let base = Style::default().fg(Color::White);
         let strip = build("#[fg=green]hi#[default]bye");
-        let segs = strip.resolve(base, None);
+        let segs = strip.resolve(base, None, &SlotStore::default(), Instant::now());
         assert_eq!(segs[0].text, "hi");
         assert_eq!(segs[0].style.fg, Some(Color::Green));
         assert_eq!(segs[1].text, "bye");
@@ -1180,7 +1342,7 @@ mod tests {
     fn styled_content_segment_carries_resolved_style() {
         let base = Style::default().fg(Color::White).bg(Color::Black);
         let strip = build("#[fg=red,bg=green]HI");
-        let segs = strip.render_segments(40, base, None);
+        let segs = strip.render_segments(40, base, None, &SlotStore::default());
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].text, "HI");
         assert_eq!(segs[0].style.fg, Some(Color::Red));
@@ -1192,7 +1354,8 @@ mod tests {
     /// Resolve `#[fg=<value>]X` against `palette` and return the survivor style.
     fn fg_style(value: &str, palette: &Palette) -> Style {
         let strip = build(&format!("#[fg={value}]X"));
-        let segs = strip.render_segments(40, Style::default(), Some(palette));
+        let segs =
+            strip.render_segments(40, Style::default(), Some(palette), &SlotStore::default());
         segs[0].style
     }
 
@@ -1268,8 +1431,180 @@ mod tests {
     fn theme_token_resolves_on_both_fg_and_bg() {
         let p = Palette::catppuccin();
         let strip = build("#[fg=text,bg=surface0]X");
-        let segs = strip.render_segments(40, Style::default(), Some(&p));
+        let segs = strip.render_segments(40, Style::default(), Some(&p), &SlotStore::default());
         assert_eq!(segs[0].style.fg, Some(p.text));
         assert_eq!(segs[0].style.bg, Some(p.surface0));
+    }
+
+    // --- U1: host-scoped push store --------------------------------------
+
+    #[test]
+    fn slot_store_set_and_get_by_source() {
+        let mut store = SlotStore::default();
+        let now = Instant::now();
+        assert!(store.set("git".into(), "main".into(), None, None, now));
+        assert_eq!(store.get("git", now), Some("main"));
+        // A missing source has no value.
+        assert_eq!(store.get("cwd", now), None);
+    }
+
+    #[test]
+    fn slot_store_newer_seq_overwrites_older_and_equal_ignored() {
+        let mut store = SlotStore::default();
+        let now = Instant::now();
+        assert!(store.set("git".into(), "main".into(), Some(5), None, now));
+        // Equal seq is ignored (returns false, value unchanged).
+        assert!(!store.set("git".into(), "feature".into(), Some(5), None, now));
+        assert_eq!(store.get("git", now), Some("main"));
+        // Older seq is ignored.
+        assert!(!store.set("git".into(), "feature".into(), Some(4), None, now));
+        assert_eq!(store.get("git", now), Some("main"));
+        // Newer seq wins.
+        assert!(store.set("git".into(), "feature".into(), Some(6), None, now));
+        assert_eq!(store.get("git", now), Some("feature"));
+    }
+
+    #[test]
+    fn slot_store_ttl_expiry_hides_value_at_read_time() {
+        let mut store = SlotStore::default();
+        let now = Instant::now();
+        assert!(store.set(
+            "t".into(),
+            "hi".into(),
+            None,
+            Some(Duration::from_millis(10)),
+            now
+        ));
+        // Still visible before the deadline.
+        assert_eq!(store.get("t", now + Duration::from_millis(5)), Some("hi"));
+        // Hidden once the TTL elapses (lazy, evaluated at read).
+        assert_eq!(store.get("t", now + Duration::from_millis(10)), None);
+        assert_eq!(store.get("t", now + Duration::from_millis(50)), None);
+    }
+
+    #[test]
+    fn slot_store_clear_removes_value() {
+        let mut store = SlotStore::default();
+        let now = Instant::now();
+        store.set("git".into(), "main".into(), None, None, now);
+        assert!(store.clear("git", now));
+        assert_eq!(store.get("git", now), None);
+        // Clearing an already-empty source reports no visible change.
+        assert!(!store.clear("git", now));
+        // A fresh writer after clear starts clean even with a low seq.
+        assert!(store.set("git".into(), "dev".into(), Some(1), None, now));
+        assert_eq!(store.get("git", now), Some("dev"));
+    }
+
+    #[test]
+    fn slot_store_set_reports_visible_change() {
+        let mut store = SlotStore::default();
+        let now = Instant::now();
+        // First set makes it visible.
+        assert!(store.set("s".into(), "a".into(), None, None, now));
+        // Same text is not a visible change.
+        assert!(!store.set("s".into(), "a".into(), None, None, now));
+        // Different text is a visible change.
+        assert!(store.set("s".into(), "b".into(), None, None, now));
+    }
+
+    #[test]
+    fn empty_store_renders_no_slot_text() {
+        let strip = build("#{slot:git}");
+        assert_eq!(strip.render_line_with_slots(40, &SlotStore::default()), "");
+    }
+
+    // --- U3: `#{slot:NAME}` parse + render -------------------------------
+
+    #[test]
+    fn parses_slot_token() {
+        assert_eq!(
+            parse_status_right("#{slot:git}"),
+            vec![Segment::Slot("git".into())]
+        );
+    }
+
+    #[test]
+    fn unclosed_slot_token_degrades_to_literal() {
+        assert_eq!(
+            parse_status_right("#{slot:git"),
+            vec![Segment::Literal("#{slot:git".into())]
+        );
+    }
+
+    #[test]
+    fn unrecognized_hash_brace_body_degrades_to_literal() {
+        // A closed `#{…}` that is not `slot:` stays literal (no token created).
+        assert_eq!(
+            parse_status_right("#{foo}"),
+            vec![Segment::Literal("#{foo}".into())]
+        );
+    }
+
+    #[test]
+    fn slot_renders_pushed_value() {
+        let strip = build("#{slot:git}");
+        let mut slots = SlotStore::default();
+        slots.set("git".into(), "main".into(), None, None, Instant::now());
+        assert_eq!(strip.render_line_with_slots(40, &slots), "main");
+    }
+
+    #[test]
+    fn unset_slot_drops_its_separator() {
+        let mut strip = build("#{slot:git} │ %H:%M");
+        strip.refresh_clock(&fixed_time());
+        // git slot is unset → empty → its trailing separator drops.
+        assert_eq!(
+            strip.render_line_with_slots(40, &SlotStore::default()),
+            "09:04"
+        );
+    }
+
+    #[test]
+    fn set_slot_keeps_its_separator() {
+        let mut strip = build("#{slot:git} │ %H:%M");
+        strip.refresh_clock(&fixed_time());
+        let mut slots = SlotStore::default();
+        slots.set("git".into(), "main".into(), None, None, Instant::now());
+        assert_eq!(strip.render_line_with_slots(40, &slots), "main │ 09:04");
+    }
+
+    #[test]
+    fn slot_composes_with_command_and_clock() {
+        let mut strip = build("#{slot:git} │ #(cpu.sh)% │ %H:%M");
+        strip.apply_command_result("cpu.sh", Ok("42".into()));
+        strip.refresh_clock(&fixed_time());
+        let mut slots = SlotStore::default();
+        slots.set("git".into(), "main".into(), None, None, Instant::now());
+        assert_eq!(
+            strip.render_line_with_slots(40, &slots),
+            "main │ 42% │ 09:04"
+        );
+    }
+
+    #[test]
+    fn styled_pill_around_slot_keeps_style_when_untruncated() {
+        let strip = build("#[fg=red,bg=green]#{slot:git}#[default] │ %H:%M");
+        let mut slots = SlotStore::default();
+        slots.set("git".into(), "main".into(), None, None, Instant::now());
+        let base = Style::default();
+        let segs = strip.render_segments(40, base, None, &slots);
+        let slot_seg = segs.iter().find(|s| s.text == "main").unwrap();
+        assert_eq!(slot_seg.style.fg, Some(Color::Red));
+        assert_eq!(slot_seg.style.bg, Some(Color::Green));
+    }
+
+    #[test]
+    fn styled_slot_keeps_style_as_sole_survivor_under_truncation() {
+        // The slot sits rightmost so it survives when the budget forces the
+        // clock and its separator to drop; its captured pill style is retained.
+        let mut strip = build("%H:%M │ #[fg=red,bg=green]#{slot:git}");
+        strip.refresh_clock(&fixed_time());
+        let mut slots = SlotStore::default();
+        slots.set("git".into(), "main".into(), None, None, Instant::now());
+        let segs = strip.render_segments(4, Style::default(), None, &slots);
+        assert_eq!(joined(&segs), "main");
+        assert_eq!(segs.last().unwrap().style.fg, Some(Color::Red));
+        assert_eq!(segs.last().unwrap().style.bg, Some(Color::Green));
     }
 }

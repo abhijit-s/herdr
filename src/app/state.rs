@@ -1425,6 +1425,9 @@ pub struct AppState {
     /// tmux-style right status strip: parsed segments and resolved caches.
     /// Render-scheduling state only; nothing exposes it over the JSON API.
     pub(crate) status_strip: crate::ui::status_right::StatusStripState,
+    /// Host-scoped push-lane store feeding `#{slot:NAME}` strip tokens. Kept
+    /// separate from `status_strip` so pushed values survive a config reload.
+    pub(crate) status_slots: crate::ui::status_right::SlotStore,
     pub keybinds: Keybinds,
     /// Frame counter for spinner animations (wraps around).
     pub spinner_tick: u32,
@@ -1778,6 +1781,7 @@ impl AppState {
             local_sound_playback: false,
             toast_config: ToastConfig::default(),
             status_strip: crate::ui::status_right::StatusStripState::default(),
+            status_slots: crate::ui::status_right::SlotStore::default(),
             keybinds: Keybinds::default(),
             spinner_tick: 0,
             palette: Palette::catppuccin(),

@@ -349,6 +349,30 @@ Besides names, hex, and `rgb(r,g,b)`, `fg` and `bg` also accept Herdr's semantic
 status_right = "#[fg=text,bg=surface0] #(gitmux) #[bg=mauve] %H:%M #[fg=accent] ●"
 ```
 
+Alongside the pull lane (`#(command)`, run on `status_interval`), `status_right` supports a **push lane**: a `#{slot:NAME}` token renders the latest value a client pushed for `NAME` over the API socket, and repaints on change without any polling. Where `#(git branch)` runs wherever the server runs, a pushed slot lets an external watcher resolve a per-context value — the focused pane's directory, application, git branch, or session — and push it in. Pushed values are host-scoped (keyed by `source` only), last-writer-wins by an optional `seq`, and expire after an optional `ttl_ms`. Their text is sanitized to plain text just like `#(command)` output; styling still comes only from the `#[…]` directives you author, so a `#{slot:NAME}` can sit inside a styled pill exactly like a command segment. An unset or expired slot renders empty and drops its adjacent separator, just like an empty command. Push and clear a slot with the CLI:
+
+```bash
+herdr status set --source git --text main          # #{slot:git} now renders "main"
+herdr status set --source git --text main --ttl-ms 5000   # expires after 5s
+herdr status set --source git --text main --seq 7  # last-writer-wins by seq
+herdr status clear --source git                    # empties #{slot:git}
+```
+
+A `status_right` mixing pull, push, and clock segments:
+
+```toml
+[ui.status]
+status_right = "#[fg=mauve]#{slot:app}#[default] │ #{slot:git} │ #(cpu.sh)% │ %H:%M"
+```
+
+A shipped watcher plugin is a separate effort; the mechanism here is the building block. A minimal focused-pane git-branch watcher is just a loop that reads the focused pane's directory and pushes the branch:
+
+```bash
+# on pane focus change:
+branch=$(git -C "$focused_pane_cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
+herdr status set --source git --text "${branch:-}"
+```
+
 The agent panel shows all agents across all spaces. `agent_panel_sort` can be `spaces` or `priority`; `workspaces` is accepted as an alias for `spaces`. `spaces` is the default and keeps agents grouped by space order. `priority` sorts by attention priority: blocked, done, working, idle, then unknown. Within the same status, agents that most recently changed state appear first.
 
 `confirm_close` controls whether closing a workspace asks for confirmation. `prompt_new_tab_name` controls whether new tabs ask for a label first.

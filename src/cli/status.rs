@@ -2,8 +2,15 @@ use serde::Serialize;
 
 use crate::api;
 use crate::api::client::{ApiClient, ApiClientError};
+use crate::api::schema::{Method, StatusClearParams, StatusSetParams};
 
 pub(super) fn run_status_command(args: &[String]) -> std::io::Result<i32> {
+    match args.first().map(|arg| arg.as_str()) {
+        Some("set") => return status_set(&args[1..]),
+        Some("clear") => return status_clear(&args[1..]),
+        _ => {}
+    }
+
     let Some((scope, json)) = parse_status_args(args) else {
         return Ok(2);
     };
@@ -20,6 +27,106 @@ pub(super) fn run_status_command(args: &[String]) -> std::io::Result<i32> {
             Ok(0)
         }
     }
+}
+
+fn status_set(args: &[String]) -> std::io::Result<i32> {
+    let mut source = None;
+    let mut text = None;
+    let mut seq = None;
+    let mut ttl_ms = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--source" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --source");
+                    return Ok(2);
+                };
+                source = Some(value.clone());
+                index += 2;
+            }
+            "--text" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --text");
+                    return Ok(2);
+                };
+                text = Some(value.clone());
+                index += 2;
+            }
+            "--seq" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --seq");
+                    return Ok(2);
+                };
+                seq = Some(super::parse_u64_flag("--seq", value)?);
+                index += 2;
+            }
+            "--ttl-ms" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --ttl-ms");
+                    return Ok(2);
+                };
+                ttl_ms = Some(super::parse_u64_flag("--ttl-ms", value)?);
+                index += 2;
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                return Ok(2);
+            }
+        }
+    }
+
+    let Some(source) = source.and_then(|source| {
+        let source = source.trim().to_string();
+        (!source.is_empty()).then_some(source)
+    }) else {
+        eprintln!("missing required --source");
+        return Ok(2);
+    };
+    let Some(text) = text else {
+        eprintln!("missing required --text");
+        return Ok(2);
+    };
+
+    super::send_ok_request(Method::StatusSet(StatusSetParams {
+        source,
+        text,
+        seq,
+        ttl_ms,
+    }))
+}
+
+fn status_clear(args: &[String]) -> std::io::Result<i32> {
+    let mut source = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--source" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --source");
+                    return Ok(2);
+                };
+                source = Some(value.clone());
+                index += 2;
+            }
+            other => {
+                eprintln!("unknown option: {other}");
+                return Ok(2);
+            }
+        }
+    }
+
+    let Some(source) = source.and_then(|source| {
+        let source = source.trim().to_string();
+        (!source.is_empty()).then_some(source)
+    }) else {
+        eprintln!("missing required --source");
+        return Ok(2);
+    };
+
+    super::send_ok_request(Method::StatusClear(StatusClearParams { source }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,4 +435,8 @@ fn print_status_help() {
     eprintln!("  herdr status [--json]         show local client and running server status");
     eprintln!("  herdr status server [--json]  show running server status");
     eprintln!("  herdr status client [--json]  show local client binary status");
+    eprintln!(
+        "  herdr status set --source NAME --text TEXT [--seq N] [--ttl-ms N]  push a #{{slot:NAME}} value"
+    );
+    eprintln!("  herdr status clear --source NAME  clear a pushed #{{slot:NAME}} value");
 }

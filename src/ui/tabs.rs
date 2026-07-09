@@ -406,9 +406,9 @@ fn render_status_strip(app: &AppState, frame: &mut Frame) {
     }
     let p = &app.palette;
     let base = Style::default().fg(p.overlay1).bg(p.panel_bg);
-    let segments = app
-        .status_strip
-        .render_segments(rect.width as usize, base, Some(p));
+    let segments =
+        app.status_strip
+            .render_segments(rect.width as usize, base, Some(p), &app.status_slots);
     if segments.is_empty() {
         return;
     }

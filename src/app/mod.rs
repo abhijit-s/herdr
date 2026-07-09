@@ -637,6 +637,7 @@ impl App {
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
             status_strip: crate::ui::status_right::StatusStripState::from_config(&config.ui.status),
+            status_slots: crate::ui::status_right::SlotStore::default(),
             keybinds: config.keybinds(),
             spinner_tick: 0,
             palette: theme_palette,

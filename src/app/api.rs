@@ -9,6 +9,7 @@ mod panes;
 pub(crate) mod plugins;
 mod responses;
 mod session;
+mod status;
 mod tabs;
 mod workspaces;
 mod worktrees;
@@ -896,6 +897,8 @@ impl App {
             Method::NotificationShow(params) => {
                 return self.handle_notification_show(request.id, params);
             }
+            Method::StatusSet(params) => return self.handle_status_set(request.id, params),
+            Method::StatusClear(params) => return self.handle_status_clear(request.id, params),
             Method::ClientWindowTitleSet(_) | Method::ClientWindowTitleClear(_) => {
                 return responses::encode_success(
                     request.id,

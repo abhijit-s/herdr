@@ -62,6 +62,38 @@ fn request_uses_dot_method_names() {
 }
 
 #[test]
+fn status_set_and_clear_round_trip() {
+    let set = Request {
+        id: "req_set".into(),
+        method: Method::StatusSet(StatusSetParams {
+            source: "git".into(),
+            text: "main".into(),
+            seq: Some(7),
+            ttl_ms: Some(5000),
+        }),
+    };
+    let json = serde_json::to_value(&set).unwrap();
+    assert_eq!(json["method"], "status.set");
+    assert_eq!(json["params"]["source"], "git");
+    assert_eq!(json["params"]["text"], "main");
+    assert_eq!(json["params"]["seq"], 7);
+    assert_eq!(json["params"]["ttl_ms"], 5000);
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, set);
+
+    let clear = Request {
+        id: "req_clear".into(),
+        method: Method::StatusClear(StatusClearParams {
+            source: "git".into(),
+        }),
+    };
+    let json = serde_json::to_value(&clear).unwrap();
+    assert_eq!(json["method"], "status.clear");
+    let restored: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(restored, clear);
+}
+
+#[test]
 fn bundled_protocol_schema_refs_resolve_inside_bundle() {
     fn assert_no_standalone_refs(value: &serde_json::Value) {
         match value {

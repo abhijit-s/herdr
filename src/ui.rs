@@ -256,7 +256,9 @@ fn compute_view_internal(
     // tabs, so the tabs zone flexes into the remainder (KTD4). The tabs zone's
     // existing scroll-arrow overflow handles crowding first.
     let status_strip_rect = if tab_bar_rect.width > 0 && app.status_strip.is_enabled() {
-        let text = app.status_strip.render_line(tab_bar_rect.width as usize);
+        let text = app
+            .status_strip
+            .render_line_with_slots(tab_bar_rect.width as usize, &app.status_slots);
         let strip_w = (UnicodeWidthStr::width(text.as_str()) as u16).min(tab_bar_rect.width);
         if strip_w == 0 {
             Rect::default()

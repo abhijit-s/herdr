@@ -3085,6 +3085,50 @@
           ],
           "type": "string"
         },
+        "StatusClearParams": {
+          "description": "Clear the pushed value for a source, emptying any `#{slot:NAME}` bound to it.",
+          "properties": {
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
+        },
+        "StatusSetParams": {
+          "description": "Push a source-keyed value into the status strip's push lane. The value\nrenders wherever a matching `#{slot:NAME}` token appears in `status_right`.\nHost-scoped (keyed by `source` only). Last-writer-wins by `seq`; `ttl_ms`\nexpires the value lazily.",
+          "properties": {
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "source": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "ttl_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "text"
+          ],
+          "type": "object"
+        },
         "Subscription": {
           "oneOf": [
             {
@@ -3835,6 +3879,38 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/NotificationShowParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "status.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/StatusSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "status.clear",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/StatusClearParams"
             }
           },
           "required": [
