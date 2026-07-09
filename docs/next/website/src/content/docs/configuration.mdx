@@ -342,6 +342,13 @@ status_interval = 5
 status_right = "#[fg=black,bg=green] #(gitmux) #[fg=green,bg=blue] %H:%M "
 ```
 
+Besides names, hex, and `rgb(r,g,b)`, `fg` and `bg` also accept Herdr's semantic theme tokens by name: `accent`, `panel_bg`, `surface0`, `surface1`, `surface_dim`, `overlay0`, `overlay1`, `text`, `subtext0`, `mauve`, `teal`, and `peach`. These resolve from the active theme, so the strip follows your `[theme]` choice, any `[theme.custom]` overrides, and `auto_switch` light/dark switching without editing `status_right`. The ANSI names (`green`, `yellow`, `red`, `blue`, `cyan`, …) are unchanged — they still resolve to the terminal's ANSI palette rather than a theme token, so existing strips keep their appearance. A theme-token example:
+
+```toml
+[ui.status]
+status_right = "#[fg=text,bg=surface0] #(gitmux) #[bg=mauve] %H:%M #[fg=accent] ●"
+```
+
 The agent panel shows all agents across all spaces. `agent_panel_sort` can be `spaces` or `priority`; `workspaces` is accepted as an alias for `spaces`. `spaces` is the default and keeps agents grouped by space order. `priority` sorts by attention priority: blocked, done, working, idle, then unknown. Within the same status, agents that most recently changed state appear first.
 
 `confirm_close` controls whether closing a workspace asks for confirmation. `prompt_new_tab_name` controls whether new tabs ask for a label first.

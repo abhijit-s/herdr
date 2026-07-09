@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use ratatui::style::{Color, Modifier, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::app::state::Palette;
 use crate::config::parse_color_opt;
 
 /// Upper bound on characters kept from a `#(command)` line before display-width
@@ -30,6 +31,12 @@ const ELLIPSIS: char = '…';
 pub(crate) struct StyleSpec {
     pub fg: Option<Color>,
     pub bg: Option<Color>,
+    /// A theme-token fg name (e.g. `accent`, `mauve`) deferred to render time
+    /// so it tracks the active `Palette`. Set only when the value is not a
+    /// hex/rgb/ANSI color (those resolve to `fg` at parse time).
+    pub fg_token: Option<String>,
+    /// A theme-token bg name, deferred to render time (mirrors `fg_token`).
+    pub bg_token: Option<String>,
     pub add_modifier: Modifier,
     /// `#[default]`/`#[none]`: reset the current style back to the strip base.
     pub reset: bool,
@@ -38,16 +45,58 @@ pub(crate) struct StyleSpec {
 impl StyleSpec {
     /// Fold this directive onto the current style (KTD3, stateful): `reset`
     /// snaps back to `base`, then fg/bg/modifiers layer on top cumulatively.
-    fn apply(&self, base: Style, current: Style) -> Style {
+    /// A deferred theme token resolves against `palette` here (KTD1/KTD2); the
+    /// width-only path passes `None`, so tokens contribute no color there.
+    fn apply(&self, base: Style, current: Style, palette: Option<&Palette>) -> Style {
         let mut next = if self.reset { base } else { current };
-        if let Some(fg) = self.fg {
+        if let Some(fg) = self.resolved_fg(palette) {
             next = next.fg(fg);
         }
-        if let Some(bg) = self.bg {
+        if let Some(bg) = self.resolved_bg(palette) {
             next = next.bg(bg);
         }
         next.add_modifier(self.add_modifier)
     }
+
+    fn resolved_fg(&self, palette: Option<&Palette>) -> Option<Color> {
+        self.fg.or_else(|| {
+            self.fg_token
+                .as_deref()
+                .and_then(|token| palette.and_then(|p| theme_token(token, p)))
+        })
+    }
+
+    fn resolved_bg(&self, palette: Option<&Palette>) -> Option<Color> {
+        self.bg.or_else(|| {
+            self.bg_token
+                .as_deref()
+                .and_then(|token| palette.and_then(|p| theme_token(token, p)))
+        })
+    }
+}
+
+/// Resolve a herdr theme-token name to its color in the active [`Palette`].
+/// Maps only the theme-only tokens that have no ANSI equivalent; the
+/// overlapping names (`green`/`yellow`/`red`/`blue`/`cyan`) intentionally
+/// return `None` so they keep resolving to ANSI via `parse_color_opt` (KTD2).
+/// Unknown names return `None` and are ignored by the caller (graceful degrade).
+fn theme_token(name: &str, palette: &Palette) -> Option<Color> {
+    let color = match name {
+        "accent" => palette.accent,
+        "panel_bg" => palette.panel_bg,
+        "surface0" => palette.surface0,
+        "surface1" => palette.surface1,
+        "surface_dim" => palette.surface_dim,
+        "overlay0" => palette.overlay0,
+        "overlay1" => palette.overlay1,
+        "text" => palette.text,
+        "subtext0" => palette.subtext0,
+        "mauve" => palette.mauve,
+        "teal" => palette.teal,
+        "peach" => palette.peach,
+        _ => return None,
+    };
+    Some(color)
 }
 
 /// Split a `#[…]` body on attribute commas, but not on commas inside a
@@ -93,12 +142,16 @@ fn parse_style_spec(inner: &str) -> StyleSpec {
             "reverse" => spec.add_modifier |= Modifier::REVERSED,
             _ => {
                 if let Some(value) = token.strip_prefix("fg=") {
-                    if let Some(color) = parse_color_opt(value) {
-                        spec.fg = Some(color);
+                    // hex/rgb/ANSI resolve now; other names defer to render time
+                    // as a theme token (KTD2 — the two sets are disjoint).
+                    match parse_color_opt(value) {
+                        Some(color) => spec.fg = Some(color),
+                        None => spec.fg_token = Some(value.to_string()),
                     }
                 } else if let Some(value) = token.strip_prefix("bg=") {
-                    if let Some(color) = parse_color_opt(value) {
-                        spec.bg = Some(color);
+                    match parse_color_opt(value) {
+                        Some(color) => spec.bg = Some(color),
+                        None => spec.bg_token = Some(value.to_string()),
                     }
                 }
                 // Unknown attribute: ignored.
@@ -572,12 +625,12 @@ impl StatusStripState {
     /// Resolve segments to their display text, walking the `#[…]` directive
     /// stream left-to-right and capturing the effective [`Style`] at each
     /// content/literal position (KTD3). Style directives contribute no output.
-    fn resolve(&self, base: Style) -> Vec<ResolvedSegment> {
+    fn resolve(&self, base: Style, palette: Option<&Palette>) -> Vec<ResolvedSegment> {
         let mut current = base;
         let mut out = Vec::with_capacity(self.segments.len());
         for seg in &self.segments {
             match seg {
-                Segment::Style(spec) => current = spec.apply(base, current),
+                Segment::Style(spec) => current = spec.apply(base, current, palette),
                 Segment::Literal(text) => out.push(ResolvedSegment {
                     kind: SegmentKind::Literal,
                     text: text.clone(),
@@ -611,19 +664,21 @@ impl StatusStripState {
         &self,
         available_width: usize,
         base: Style,
+        palette: Option<&Palette>,
     ) -> Vec<ResolvedSegment> {
         if !self.is_enabled() {
             return Vec::new();
         }
         let budget = self.budget.min(available_width);
-        let resolved = drop_empty_segments(self.resolve(base));
+        let resolved = drop_empty_segments(self.resolve(base, palette));
         fit_segments(&resolved, budget)
     }
 
     /// Compose the fitted strip line as plain text (style-agnostic), used for
-    /// width budgeting. Delegates to [`Self::render_segments`].
+    /// width budgeting. Delegates to [`Self::render_segments`]; colors never
+    /// affect segment text/width, so no palette is needed here.
     pub(crate) fn render_line(&self, available_width: usize) -> String {
-        joined(&self.render_segments(available_width, Style::default()))
+        joined(&self.render_segments(available_width, Style::default(), None))
     }
 }
 
@@ -1024,7 +1079,7 @@ mod tests {
     #[test]
     fn style_directives_contribute_zero_resolved_segments() {
         let strip = build("#[fg=green]#[bold]");
-        assert!(strip.resolve(Style::default()).is_empty());
+        assert!(strip.resolve(Style::default(), None).is_empty());
         assert_eq!(strip.render_line(40), "");
     }
 
@@ -1034,7 +1089,7 @@ mod tests {
     fn directive_maps_to_ratatui_style() {
         let spec = parse_style_spec("fg=green,bg=blue,underline");
         let base = Style::default();
-        let out = spec.apply(base, base);
+        let out = spec.apply(base, base, None);
         assert_eq!(out.fg, Some(Color::Green));
         assert_eq!(out.bg, Some(Color::Blue));
         assert!(out.add_modifier.contains(Modifier::UNDERLINED));
@@ -1044,7 +1099,7 @@ mod tests {
     fn segment_captures_current_style_and_default_resets_to_base() {
         let base = Style::default().fg(Color::White);
         let strip = build("#[fg=green]hi#[default]bye");
-        let segs = strip.resolve(base);
+        let segs = strip.resolve(base, None);
         assert_eq!(segs[0].text, "hi");
         assert_eq!(segs[0].style.fg, Some(Color::Green));
         assert_eq!(segs[1].text, "bye");
@@ -1125,10 +1180,96 @@ mod tests {
     fn styled_content_segment_carries_resolved_style() {
         let base = Style::default().fg(Color::White).bg(Color::Black);
         let strip = build("#[fg=red,bg=green]HI");
-        let segs = strip.render_segments(40, base);
+        let segs = strip.render_segments(40, base, None);
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].text, "HI");
         assert_eq!(segs[0].style.fg, Some(Color::Red));
         assert_eq!(segs[0].style.bg, Some(Color::Green));
+    }
+
+    // --- theme-token resolution -----------------------------------------
+
+    /// Resolve `#[fg=<value>]X` against `palette` and return the survivor style.
+    fn fg_style(value: &str, palette: &Palette) -> Style {
+        let strip = build(&format!("#[fg={value}]X"));
+        let segs = strip.render_segments(40, Style::default(), Some(palette));
+        segs[0].style
+    }
+
+    #[test]
+    fn every_theme_token_resolves_to_its_palette_field() {
+        let p = Palette::catppuccin();
+        for (name, expected) in [
+            ("accent", p.accent),
+            ("panel_bg", p.panel_bg),
+            ("surface0", p.surface0),
+            ("surface1", p.surface1),
+            ("surface_dim", p.surface_dim),
+            ("overlay0", p.overlay0),
+            ("overlay1", p.overlay1),
+            ("text", p.text),
+            ("subtext0", p.subtext0),
+            ("mauve", p.mauve),
+            ("teal", p.teal),
+            ("peach", p.peach),
+        ] {
+            assert_eq!(fg_style(name, &p).fg, Some(expected), "token: {name}");
+        }
+    }
+
+    #[test]
+    fn non_ansi_tokens_now_render_instead_of_being_ignored() {
+        let p = Palette::catppuccin();
+        // These have no ANSI equivalent, so `parse_color_opt` returns None and
+        // they were previously dropped; the token path now resolves them.
+        for name in ["mauve", "teal", "peach"] {
+            assert!(fg_style(name, &p).fg.is_some(), "token: {name}");
+        }
+        assert_eq!(fg_style("mauve", &p).fg, Some(p.mauve));
+    }
+
+    #[test]
+    fn overlapping_names_still_resolve_to_ansi_not_palette_rgb() {
+        let p = Palette::catppuccin();
+        assert_eq!(fg_style("blue", &p).fg, Some(Color::Blue));
+        assert_eq!(fg_style("green", &p).fg, Some(Color::Green));
+        assert_eq!(fg_style("yellow", &p).fg, Some(Color::Yellow));
+        assert_eq!(fg_style("red", &p).fg, Some(Color::Red));
+        assert_eq!(fg_style("cyan", &p).fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn hex_rgb_and_reset_are_unchanged_by_token_path() {
+        let p = Palette::catppuccin();
+        assert_eq!(
+            fg_style("#cba6f7", &p).fg,
+            Some(Color::Rgb(0xcb, 0xa6, 0xf7))
+        );
+        assert_eq!(fg_style("rgb(1,2,3)", &p).fg, Some(Color::Rgb(1, 2, 3)));
+        // `default` as a value resolves via `parse_color_opt` to Reset (not a token).
+        assert_eq!(fg_style("default", &p).fg, Some(Color::Reset));
+    }
+
+    #[test]
+    fn unknown_token_is_ignored_without_panic() {
+        let p = Palette::catppuccin();
+        // Unknown name defers as a token, then resolves to None → style unchanged.
+        assert_eq!(fg_style("wat", &p).fg, None);
+    }
+
+    #[test]
+    fn custom_override_is_reflected_in_token_resolution() {
+        let mut p = Palette::catppuccin();
+        p.accent = Color::Rgb(1, 2, 3);
+        assert_eq!(fg_style("accent", &p).fg, Some(Color::Rgb(1, 2, 3)));
+    }
+
+    #[test]
+    fn theme_token_resolves_on_both_fg_and_bg() {
+        let p = Palette::catppuccin();
+        let strip = build("#[fg=text,bg=surface0]X");
+        let segs = strip.render_segments(40, Style::default(), Some(&p));
+        assert_eq!(segs[0].style.fg, Some(p.text));
+        assert_eq!(segs[0].style.bg, Some(p.surface0));
     }
 }
