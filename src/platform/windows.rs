@@ -38,6 +38,10 @@ use super::{ClipboardImage, ForegroundJob, Signal};
 
 const STILL_ACTIVE: u32 = 259;
 
+pub(crate) fn should_draw_host_cursor_by_default() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WindowsProcessEntry {
     pid: u32,
