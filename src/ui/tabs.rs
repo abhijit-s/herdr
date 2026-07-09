@@ -512,6 +512,55 @@ mod tests {
         );
     }
 
+    // Regression guard: a powerline separator glyph placed as a literal in the
+    // status strip must survive the full server render + client-encode pipeline
+    // (parse -> resolve -> fit -> right-align draw -> Buffer -> FrameData -> ANSI
+    // blit). Powerline glyphs U+E0B0..E0B3 are display-width 1 in `unicode-width`,
+    // matching how ratatui and the blit encoder advance cells, so no width path
+    // clips or drops them.
+    #[test]
+    fn status_strip_powerline_arrow_survives_render_and_encode() {
+        use crate::protocol::render_ansi::BlitEncoder;
+        use crate::protocol::FrameData;
+        use ratatui::style::Color;
+
+        const ARROW: &str = "\u{e0b2}";
+
+        let mut app = AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = crate::app::Mode::Terminal;
+        // A lone arrow literal sandwiched between two style directives: fg is the
+        // left block's colour, bg is the right block's, producing the angled seam.
+        app.status_strip =
+            crate::ui::status_right::StatusStripState::from_config(&crate::config::StatusConfig {
+                status_right: format!("#[fg=black,bg=green] L #[fg=green,bg=red]{ARROW}#[fg=black,bg=red] R #[default]"),
+                status_right_length: 28,
+                status_interval: 5,
+            });
+
+        let (buffer, _) =
+            crate::server::render_stream::render_virtual(&mut app, Rect::new(0, 0, 80, 20), false);
+
+        // The arrow is drawn to its own cell with the seam colours (green on red).
+        let arrow_col = (0..80).find(|&x| buffer[(x, 0)].symbol() == ARROW);
+        let arrow_col = arrow_col.expect("powerline arrow missing from rendered strip");
+        let cell = &buffer[(arrow_col, 0)];
+        assert_eq!(cell.fg, Color::Green);
+        assert_eq!(cell.bg, Color::Red);
+
+        // The arrow bytes survive into the ANSI frame the client writes verbatim
+        // to the host terminal.
+        let frame = FrameData::from_ratatui_buffer(&buffer, None);
+        let encoded = BlitEncoder::new().encode(&frame, false).bytes;
+        let needle = ARROW.as_bytes();
+        assert!(
+            encoded.windows(needle.len()).any(|w| w == needle),
+            "arrow bytes missing from encoded ANSI frame"
+        );
+    }
+
     #[test]
     fn tab_bar_renders_status_strip_flush_right() {
         let mut app = AppState::test_new();
