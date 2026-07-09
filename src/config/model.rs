@@ -6,7 +6,8 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use super::{
     ActionKeybinds, BindingConfig, CommandKeybindConfig, IndexedKeybind, Keybinds, SoundConfig,
     ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES,
-    DEFAULT_SCROLLBACK_LIMIT_BYTES,
+    DEFAULT_SCROLLBACK_LIMIT_BYTES, DEFAULT_STATUS_INTERVAL_SECONDS, DEFAULT_STATUS_RIGHT_LENGTH,
+    MIN_STATUS_INTERVAL_SECONDS,
 };
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
@@ -174,6 +175,42 @@ fn parse_right_click_passthrough_modifier(value: &str) -> Option<Option<KeyModif
     }
 
     (!modifiers.is_empty()).then_some(Some(modifiers))
+}
+
+/// tmux-modeled `[ui.status]` right-strip configuration.
+///
+/// An empty `status_right` (or a zero `status_right_length`) disables the
+/// strip and reserves no space on the tab bar.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct StatusConfig {
+    /// Format string for the right status strip. Supports literal text, a
+    /// `%`-strftime subset (`%H %M %S %d %b %Y %%`), and `#(command)` segments
+    /// whose stdout becomes the segment text. Empty disables the strip.
+    pub status_right: String,
+    /// Column budget reserved for the strip on the right of the tab bar. Zero
+    /// disables the strip (no reserved zone).
+    pub status_right_length: usize,
+    /// Refresh cadence in seconds for `#(command)` segments. Clamped up to
+    /// `MIN_STATUS_INTERVAL_SECONDS` when read.
+    pub status_interval: u64,
+}
+
+impl Default for StatusConfig {
+    fn default() -> Self {
+        Self {
+            status_right: String::new(),
+            status_right_length: DEFAULT_STATUS_RIGHT_LENGTH,
+            status_interval: DEFAULT_STATUS_INTERVAL_SECONDS,
+        }
+    }
+}
+
+impl StatusConfig {
+    /// Command-refresh interval with the minimum floor applied.
+    pub fn effective_interval_seconds(&self) -> u64 {
+        self.status_interval.max(MIN_STATUS_INTERVAL_SECONDS)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -815,6 +852,8 @@ pub struct UiConfig {
     pub toast: ToastConfig,
     /// Play sounds when agents change state in background workspaces.
     pub sound: SoundConfig,
+    /// tmux-style right status strip in the tab bar.
+    pub status: StatusConfig,
 }
 
 /// Cursor shape (DECSCUSR) used for the forced IME anchor.
@@ -1003,6 +1042,7 @@ impl Default for UiConfig {
             accent: "cyan".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
+            status: StatusConfig::default(),
         }
     }
 }
@@ -1365,6 +1405,74 @@ sidebar_collapsed_mode = "hidden"
         assert_eq!(validated_sidebar_bounds(0, u16::MAX), Some((0, u16::MAX)));
         assert_eq!(validated_sidebar_bounds(50, 30), None);
         assert_eq!(validated_sidebar_bounds(u16::MAX, 0), None);
+    }
+
+    #[test]
+    fn status_config_defaults_disable_strip() {
+        let default_config = Config::default();
+        assert!(default_config.ui.status.status_right.is_empty());
+        assert_eq!(
+            default_config.ui.status.status_right_length,
+            DEFAULT_STATUS_RIGHT_LENGTH
+        );
+        assert_eq!(
+            default_config.ui.status.status_interval,
+            DEFAULT_STATUS_INTERVAL_SECONDS
+        );
+        // Empty status_right leaves the strip disabled.
+        assert!(
+            !crate::ui::status_right::StatusStripState::from_config(&default_config.ui.status)
+                .is_enabled()
+        );
+    }
+
+    #[test]
+    fn status_config_parses_full_block() {
+        let toml = r##"
+[ui.status]
+status_right = "#(gitmux) │ %H:%M"
+status_right_length = 40
+status_interval = 10
+"##;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.status.status_right, "#(gitmux) │ %H:%M");
+        assert_eq!(config.ui.status.status_right_length, 40);
+        assert_eq!(config.ui.status.status_interval, 10);
+        assert!(
+            crate::ui::status_right::StatusStripState::from_config(&config.ui.status).is_enabled()
+        );
+        assert_eq!(config.ui.status.effective_interval_seconds(), 10);
+    }
+
+    #[test]
+    fn status_interval_clamps_up_to_floor() {
+        let toml = r#"
+[ui.status]
+status_right = "%H:%M"
+status_interval = 0
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        // Raw value is preserved; the effective interval is floored.
+        assert_eq!(config.ui.status.status_interval, 0);
+        assert_eq!(
+            config.ui.status.effective_interval_seconds(),
+            MIN_STATUS_INTERVAL_SECONDS
+        );
+    }
+
+    #[test]
+    fn status_zero_length_disables_strip() {
+        // A zero column budget means no reserved zone, so the strip is treated
+        // as disabled even when status_right has content.
+        let toml = r#"
+[ui.status]
+status_right = "%H:%M"
+status_right_length = 0
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(
+            !crate::ui::status_right::StatusStripState::from_config(&config.ui.status).is_enabled()
+        );
     }
 
     #[test]

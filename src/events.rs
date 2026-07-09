@@ -155,6 +155,13 @@ pub enum AppEvent {
         stderr: String,
         error: Option<String>,
     },
+    /// A status-strip `#(command)` finished. `result` is the captured stdout on
+    /// success or an error description; either way it clears the command's
+    /// in-flight flag.
+    StatusCommandFinished {
+        command: String,
+        result: Result<String, String>,
+    },
     /// Background `git worktree add` completed.
     WorktreeAddFinished(Box<WorktreeAddResult>),
     /// Background `git worktree remove` completed.

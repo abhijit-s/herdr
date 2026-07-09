@@ -320,6 +320,11 @@ show_agent_labels_on_pane_borders = false
 hide_tab_bar_when_single_tab = false
 agent_panel_sort = "spaces"
 accent = "cyan"
+
+[ui.status]
+status_right = "#(gitmux) │ CPU #(cpu.sh)% │ %H:%M"
+status_right_length = 28
+status_interval = 5
 ```
 
 `sidebar_min_width` and `sidebar_max_width` control the expanded sidebar's resize bounds in columns. The defaults are 18 and 36.
@@ -327,6 +332,8 @@ accent = "cyan"
 `sidebar_collapsed_mode` controls what remains visible after toggling the sidebar closed. The default, `compact`, keeps the narrow status rail. Set it to `hidden` to make the collapsed sidebar zero-width; reopen it with `keys.toggle_sidebar`.
 
 `mobile_width_threshold` controls the terminal width at or below which Herdr uses the mobile single-column layout. The default is 64 columns; increase it for foldables, tablets, or wide phone terminals.
+
+`[ui.status]` adds a tmux-style right-aligned status strip to the tab bar. `status_right` is the format string; it is empty by default, which hides the strip. It supports literal text, a `%`-strftime subset (`%H`, `%M`, `%S`, `%d`, `%b`, `%Y`, and `%%`), and `#(command)` segments whose first line of standard output becomes the segment text. Simple single-line tmux status scripts such as `#(cpu.sh)` or `#(gitmux)` work nearly verbatim. `status_right_length` is the column budget reserved on the right of the tab bar (default 28); the tabs zone flexes into the remainder and scrolls first, and when the strip still overflows it drops whole segments from the left. `status_interval` is the refresh cadence in seconds for `#(command)` segments (default 5, floored at 1). The clock repaints on its own finer cadence, so a `%S` clock stays current regardless of `status_interval`. The strip is hidden in the mobile single-column layout.
 
 The agent panel shows all agents across all spaces. `agent_panel_sort` can be `spaces` or `priority`; `workspaces` is accepted as an alias for `spaces`. `spaces` is the default and keeps agents grouped by space order. `priority` sorts by attention priority: blocked, done, working, idle, then unknown. Within the same status, agents that most recently changed state appear first.
 

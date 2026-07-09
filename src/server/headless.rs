@@ -3602,6 +3602,9 @@ impl HeadlessServer {
         let mut changed = false;
 
         self.app.sync_headless_animation_timer(now);
+        let has_status_client = self.has_app_client();
+        self.app.sync_status_strip_timers(now, has_status_client);
+        changed |= self.app.tick_status_strip(now);
 
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.
@@ -3732,6 +3735,7 @@ impl HeadlessServer {
                 .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
         }
         self.app.sync_headless_animation_timer(now);
+        self.app.sync_status_strip_timers(now, has_status_client);
         changed
     }
 

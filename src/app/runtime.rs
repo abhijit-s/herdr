@@ -200,6 +200,9 @@ impl App {
         let mut resized = false;
 
         self.sync_animation_timer(now);
+        // Monolithic/foreground mode always has the local terminal as a client.
+        self.sync_status_strip_timers(now, true);
+        changed |= self.tick_status_strip(now);
 
         if now >= self.next_resize_poll {
             resized = self.handle_resize_poll();
@@ -358,6 +361,65 @@ impl App {
             .workspaces
             .iter()
             .any(|ws| ws.has_working_pane(&self.state.terminals))
+    }
+
+    /// Arm or disarm the status-strip cadences. Both are armed only when the
+    /// strip is enabled AND a client is attached (KTD5), independent of the
+    /// agent-animation gate. `get_or_insert(now)` warms both immediately on arm
+    /// so the strip populates promptly instead of showing blanks.
+    pub(crate) fn sync_status_strip_timers(&mut self, now: Instant, has_client: bool) {
+        if has_client && self.state.status_strip.is_enabled() {
+            if self.state.status_strip.clock_period().is_some() {
+                self.next_status_clock_tick.get_or_insert(now);
+            } else {
+                self.next_status_clock_tick = None;
+            }
+            if self.state.status_strip.has_commands() {
+                self.next_status_command_tick.get_or_insert(now);
+            } else {
+                self.next_status_command_tick = None;
+            }
+        } else {
+            self.next_status_clock_tick = None;
+            self.next_status_command_tick = None;
+        }
+    }
+
+    /// Run any due status-strip work: repaint the clock and spawn due
+    /// `#(command)` segments. Returns whether an immediate repaint is needed
+    /// (the clock changed). Command output arrives asynchronously and marks its
+    /// own repaint on completion.
+    pub(crate) fn tick_status_strip(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+
+        if self
+            .next_status_clock_tick
+            .is_some_and(|deadline| now >= deadline)
+        {
+            let sampled = crate::ui::status_right::ClockTime::now_local();
+            self.state.status_strip.refresh_clock(&sampled);
+            let period = self
+                .state
+                .status_strip
+                .clock_period()
+                .unwrap_or(Duration::from_secs(60));
+            self.next_status_clock_tick = Some(now + period);
+            changed = true;
+        }
+
+        if self
+            .next_status_command_tick
+            .is_some_and(|deadline| now >= deadline)
+        {
+            for command in self.state.status_strip.due_commands(now) {
+                self.state.status_strip.mark_command_started(&command, now);
+                crate::ui::status_right::spawn_status_command(command, self.event_tx.clone());
+            }
+            let interval = self.state.status_strip.command_interval();
+            self.next_status_command_tick = Some(now + interval);
+        }
+
+        changed
     }
 
     pub(crate) fn tick_selection_autoscroll(&mut self, now: Instant) {
@@ -556,6 +618,8 @@ impl App {
             self.state.next_pending_agent_notification_deadline(),
             self.copy_feedback_deadline,
             self.next_animation_tick,
+            self.next_status_clock_tick,
+            self.next_status_command_tick,
             include_git_refresh
                 .then(|| self.git_refresh_deadline())
                 .flatten(),

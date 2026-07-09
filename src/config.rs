@@ -20,8 +20,8 @@ pub use self::{
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
         ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig, ShellModeConfig,
-        SidebarCollapsedModeConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
-        ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+        SidebarCollapsedModeConfig, StatusConfig, ToastClipboardPosition, ToastConfig,
+        ToastDelivery, ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sound::SoundConfig,
     theme::{parse_color, CustomThemeColors, ThemeConfig},
@@ -34,6 +34,11 @@ pub const CONFIG_PATH_ENV_VAR: &str = "HERDR_CONFIG_PATH";
 pub const DEFAULT_SCROLLBACK_LIMIT_BYTES: usize = 10_000_000;
 pub const DEFAULT_MOUSE_SCROLL_LINES: usize = 3;
 pub const DEFAULT_MOBILE_WIDTH_THRESHOLD: u16 = 64;
+pub const DEFAULT_STATUS_RIGHT_LENGTH: usize = 28;
+pub const DEFAULT_STATUS_INTERVAL_SECONDS: u64 = 5;
+/// Minimum floor for `[ui.status] status_interval`. Bounds `#(command)` spawn
+/// frequency so a misconfigured tiny interval cannot spawn a process storm.
+pub const MIN_STATUS_INTERVAL_SECONDS: u64 = 1;
 
 #[cfg(test)]
 pub(crate) fn app_dir_name() -> &'static str {

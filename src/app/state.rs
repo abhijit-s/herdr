@@ -736,6 +736,9 @@ pub struct ViewState {
     pub tab_scroll_left_hit_area: Rect,
     pub tab_scroll_right_hit_area: Rect,
     pub new_tab_hit_area: Rect,
+    /// Reserved right-edge zone for the tmux-style status strip. Zero width when
+    /// the strip is disabled or the mobile layout is active.
+    pub status_strip_rect: Rect,
     pub terminal_area: Rect,
     pub mobile_header_rect: Rect,
     pub mobile_menu_hit_area: Rect,
@@ -1419,6 +1422,9 @@ pub struct AppState {
     pub sound: SoundConfig,
     pub local_sound_playback: bool,
     pub toast_config: ToastConfig,
+    /// tmux-style right status strip: parsed segments and resolved caches.
+    /// Render-scheduling state only; nothing exposes it over the JSON API.
+    pub(crate) status_strip: crate::ui::status_right::StatusStripState,
     pub keybinds: Keybinds,
     /// Frame counter for spinner animations (wraps around).
     pub spinner_tick: u32,
@@ -1705,6 +1711,7 @@ impl AppState {
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
+                status_strip_rect: Rect::default(),
                 terminal_area: Rect::default(),
                 mobile_header_rect: Rect::default(),
                 mobile_menu_hit_area: Rect::default(),
@@ -1770,6 +1777,7 @@ impl AppState {
             },
             local_sound_playback: false,
             toast_config: ToastConfig::default(),
+            status_strip: crate::ui::status_right::StatusStripState::default(),
             keybinds: Keybinds::default(),
             spinner_tick: 0,
             palette: Palette::catppuccin(),

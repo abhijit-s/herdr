@@ -4,6 +4,7 @@ use ratatui::{
     text::Span,
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 mod dialogs;
 mod keybind_help;
@@ -17,6 +18,7 @@ mod scrollbar;
 mod settings;
 mod sidebar;
 mod status;
+pub(crate) mod status_right;
 mod tabs;
 mod text;
 mod widgets;
@@ -250,13 +252,45 @@ fn compute_view_internal(
         compute_workspace_card_areas(app, sidebar_area)
     };
 
+    // Reserve the status strip's budget on the right edge before laying out
+    // tabs, so the tabs zone flexes into the remainder (KTD4). The tabs zone's
+    // existing scroll-arrow overflow handles crowding first.
+    let status_strip_rect = if tab_bar_rect.width > 0 && app.status_strip.is_enabled() {
+        let text = app.status_strip.render_line(tab_bar_rect.width as usize);
+        let strip_w = (UnicodeWidthStr::width(text.as_str()) as u16).min(tab_bar_rect.width);
+        if strip_w == 0 {
+            Rect::default()
+        } else {
+            Rect::new(
+                tab_bar_rect.x + tab_bar_rect.width - strip_w,
+                tab_bar_rect.y,
+                strip_w,
+                1,
+            )
+        }
+    } else {
+        Rect::default()
+    };
+    let tabs_area = if status_strip_rect.width > 0 {
+        // One-column gap between the tabs zone and the strip.
+        let reserved = status_strip_rect.width.saturating_add(1);
+        Rect::new(
+            tab_bar_rect.x,
+            tab_bar_rect.y,
+            tab_bar_rect.width.saturating_sub(reserved),
+            tab_bar_rect.height,
+        )
+    } else {
+        tab_bar_rect
+    };
+
     let tab_bar_view = app
         .active
         .and_then(|ws_idx| app.workspaces.get(ws_idx))
         .map(|ws| {
             compute_tab_bar_view(
                 ws,
-                tab_bar_rect,
+                tabs_area,
                 app.tab_scroll,
                 app.tab_scroll_follow_active,
                 app.mouse_capture,
@@ -310,6 +344,7 @@ fn compute_view_internal(
         tab_scroll_left_hit_area: tab_bar_view.scroll_left_hit_area,
         tab_scroll_right_hit_area: tab_bar_view.scroll_right_hit_area,
         new_tab_hit_area: tab_bar_view.new_tab_hit_area,
+        status_strip_rect,
         terminal_area,
         mobile_header_rect: Rect::default(),
         mobile_menu_hit_area: Rect::default(),
@@ -380,6 +415,7 @@ fn compute_mobile_view(
         tab_scroll_left_hit_area: Rect::default(),
         tab_scroll_right_hit_area: Rect::default(),
         new_tab_hit_area: Rect::default(),
+        status_strip_rect: Rect::default(),
         terminal_area,
         mobile_header_rect: header_rect,
         mobile_menu_hit_area: header_hits.menu,
@@ -741,6 +777,70 @@ mod tests {
         assert_eq!(app.view.layout, ViewLayout::Mobile);
         assert_eq!(app.view.mobile_header_rect, Rect::new(0, 0, 80, 2));
         assert_eq!(app.view.terminal_area, Rect::new(0, 2, 80, 18));
+    }
+
+    fn enabled_strip(status_right: &str, length: usize) -> status_right::StatusStripState {
+        status_right::StatusStripState::from_config(&crate::config::StatusConfig {
+            status_right: status_right.to_string(),
+            status_right_length: length,
+            status_interval: 5,
+        })
+    }
+
+    #[test]
+    fn status_strip_reserves_right_zone_and_keeps_tab_bar_full_width() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        app.status_strip = enabled_strip("READY", 20);
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+
+        // Literal "READY" is 5 columns, flush against the right edge.
+        let strip = app.view.status_strip_rect;
+        assert_eq!(strip.width, 5);
+        assert_eq!(strip.x + strip.width, 80);
+        assert_eq!(strip.y, 0);
+        // The tab bar still spans the full main width for its background fill,
+        // but tab hit areas stay left of the reserved zone + gap.
+        assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
+        assert!(app
+            .view
+            .tab_hit_areas
+            .iter()
+            .filter(|rect| rect.width > 0)
+            .all(|rect| rect.x + rect.width <= strip.x));
+    }
+
+    #[test]
+    fn status_strip_absent_leaves_layout_unchanged() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        // Default strip is disabled.
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.status_strip_rect, Rect::default());
+        assert_eq!(app.view.tab_bar_rect, Rect::new(26, 0, 54, 1));
+    }
+
+    #[test]
+    fn status_strip_hidden_in_mobile_layout() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.active = Some(0);
+        app.selected = 0;
+        app.mode = Mode::Terminal;
+        app.status_strip = enabled_strip("READY", 20);
+        app.mobile_width_threshold = 90;
+
+        compute_view(&mut app, Rect::new(0, 0, 80, 20));
+        assert_eq!(app.view.layout, ViewLayout::Mobile);
+        assert_eq!(app.view.status_strip_rect, Rect::default());
     }
 
     #[test]

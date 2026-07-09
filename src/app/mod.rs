@@ -118,6 +118,14 @@ pub struct App {
     pub(crate) last_pane_click: Option<PaneClickState>,
     pub(crate) next_resize_poll: Instant,
     pub(crate) next_animation_tick: Option<Instant>,
+    /// Clock repaint deadline for the status strip. Cadence is the finest
+    /// configured clock field (~1s with `%S`, else 60s); armed only when the
+    /// strip is enabled and a client is attached (KTD5). Decoupled from the
+    /// `#(command)` refresh so a `%S` clock never lags behind `status_interval`.
+    pub(crate) next_status_clock_tick: Option<Instant>,
+    /// `#(command)` refresh deadline for the status strip, gated per command on
+    /// `last_run + status_interval` with a min-interval floor and skip-if-in-flight.
+    pub(crate) next_status_command_tick: Option<Instant>,
     pub(crate) next_auto_update_check: Option<Instant>,
     pub(crate) next_agent_manifest_update_check: Option<Instant>,
     pub(crate) update_version_check_enabled: bool,
@@ -563,6 +571,7 @@ impl App {
                 tab_scroll_left_hit_area: Rect::default(),
                 tab_scroll_right_hit_area: Rect::default(),
                 new_tab_hit_area: Rect::default(),
+                status_strip_rect: Rect::default(),
                 terminal_area: Rect::default(),
                 mobile_header_rect: Rect::default(),
                 mobile_menu_hit_area: Rect::default(),
@@ -627,6 +636,7 @@ impl App {
             sound: config.ui.sound.clone(),
             local_sound_playback: true,
             toast_config: config.ui.toast.clone(),
+            status_strip: crate::ui::status_right::StatusStripState::from_config(&config.ui.status),
             keybinds: config.keybinds(),
             spinner_tick: 0,
             palette: theme_palette,
@@ -710,6 +720,8 @@ impl App {
             last_pane_click: None,
             next_resize_poll: Instant::now() + RESIZE_POLL_INTERVAL,
             next_animation_tick: None,
+            next_status_clock_tick: None,
+            next_status_command_tick: None,
             next_auto_update_check: version_check_enabled
                 .then_some(Instant::now() + AUTO_UPDATE_CHECK_INTERVAL),
             next_agent_manifest_update_check: manifest_check_enabled
@@ -1359,6 +1371,12 @@ impl App {
                 self.state.sidebar_max_width = config.ui.sidebar_max_width;
                 self.state.sidebar_collapsed_mode = config.ui.sidebar_collapsed_mode;
                 self.state.mobile_width_threshold = config.ui.mobile_width_threshold;
+                // Reparse the status strip and reset its cadences so the loop
+                // re-arms (and warms) against the new config on the next tick.
+                self.state.status_strip =
+                    crate::ui::status_right::StatusStripState::from_config(&config.ui.status);
+                self.next_status_clock_tick = None;
+                self.next_status_command_tick = None;
                 // Re-clamp the live width to the new bounds. No source guard — bounds
                 // always apply, including to widths owned by Persisted or Manual.
                 self.state.sidebar_width = self

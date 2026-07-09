@@ -253,6 +253,17 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Increase this for foldables, tablets, or wide phone terminals.
 # mobile_width_threshold = 64
 
+# tmux-style right status strip in the tab bar.
+# status_right is the format string: literal text, a %-strftime subset
+# (%H %M %S %d %b %Y %%), and #(command) segments whose stdout becomes text.
+# Simple single-line tmux scripts like #(cpu.sh) or #(gitmux) work as-is.
+# Empty (the default) hides the strip. status_right_length is the reserved
+# column budget; status_interval is the #(command) refresh cadence in seconds.
+# [ui.status]
+# status_right = "#(gitmux) │ CPU #(cpu.sh)% │ %H:%M"
+# status_right_length = 28
+# status_interval = 5
+
 # Capture mouse input for Herdr's mouse UI.
 # Set false to let the terminal handle normal clicks, such as Cmd-clicking URLs.
 # Pane apps like lazygit and btop can still receive mouse when they request it.

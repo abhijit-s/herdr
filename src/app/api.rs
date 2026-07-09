@@ -139,6 +139,18 @@ impl App {
             return;
         }
 
+        if let AppEvent::StatusCommandFinished { command, result } = ev {
+            if self
+                .state
+                .status_strip
+                .apply_command_result(&command, result)
+            {
+                self.render_dirty.store(true, Ordering::Release);
+                self.render_notify.notify_one();
+            }
+            return;
+        }
+
         if let AppEvent::WorktreeAddFinished(result) = ev {
             self.handle_worktree_add_finished(*result);
             return;

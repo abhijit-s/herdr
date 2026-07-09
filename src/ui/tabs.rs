@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Modifier, Style},
     widgets::Paragraph,
     Frame,
@@ -367,6 +367,8 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         );
     }
 
+    render_status_strip(app, frame);
+
     if first_visible_idx.is_some_and(|idx| idx > 0) {
         let x = if app.mouse_capture && app.view.tab_scroll_left_hit_area.width > 0 {
             app.view.tab_scroll_left_hit_area.x + app.view.tab_scroll_left_hit_area.width
@@ -391,6 +393,27 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
                 .set_style(Style::default().fg(p.overlay0));
         }
     }
+}
+
+/// Draw the tmux-style status strip into its reserved right-edge zone. Pure:
+/// composes the line from cached values (no clock sampling, no spawning) — all
+/// sampling happens on the interval tick (KTD6).
+fn render_status_strip(app: &AppState, frame: &mut Frame) {
+    let rect = app.view.status_strip_rect;
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    let text = app.status_strip.render_line(rect.width as usize);
+    if text.is_empty() {
+        return;
+    }
+    let p = &app.palette;
+    frame.render_widget(
+        Paragraph::new(text)
+            .alignment(Alignment::Right)
+            .style(Style::default().fg(p.overlay1).bg(p.panel_bg)),
+        rect,
+    );
 }
 
 #[cfg(test)]
@@ -481,6 +504,35 @@ mod tests {
             tab_width(&ws, 0),
             display_width_u16("提交 herdr 的反馈") + 4
         );
+    }
+
+    #[test]
+    fn tab_bar_renders_status_strip_flush_right() {
+        let mut app = AppState::test_new();
+        let ws = Workspace::test_new("test");
+        app.active = Some(0);
+        app.workspaces = vec![ws];
+        app.status_strip =
+            crate::ui::status_right::StatusStripState::from_config(&crate::config::StatusConfig {
+                status_right: "READY".into(),
+                status_right_length: 20,
+                status_interval: 5,
+            });
+        app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
+        let view = compute_tab_bar_view(&app.workspaces[0], Rect::new(0, 0, 24, 1), 0, true, false);
+        app.view.tab_hit_areas = view.tab_hit_areas;
+        app.view.status_strip_rect = Rect::new(25, 0, 5, 1);
+
+        let backend = TestBackend::new(30, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+            .unwrap();
+
+        let tail: String = (25..30)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+            .collect();
+        assert_eq!(tail, "READY");
     }
 
     #[test]
