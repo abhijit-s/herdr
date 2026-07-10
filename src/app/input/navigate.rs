@@ -176,6 +176,19 @@ impl App {
         }
     }
 
+    /// Gather the live catalog (built-ins + available plugin actions + custom
+    /// commands, respecting the resolved source toggles) and open the palette.
+    pub(crate) fn open_command_palette_from(&mut self) {
+        let toggles = self.state.command_palette_sources;
+        let plugin = crate::app::command_palette::plugin_entries_from_registry(
+            &self.state.installed_plugins,
+        );
+        let custom = crate::app::command_palette::custom_entries_from_config(
+            &self.state.keybinds.custom_commands,
+        );
+        self.state.open_command_palette(toggles, plugin, custom);
+    }
+
     pub(super) fn execute_tui_navigate_action(
         &mut self,
         action: NavigateAction,
@@ -1841,6 +1854,14 @@ mod tests {
     use crate::{
         app::App, config::Config, input::TerminalKey, terminal::TerminalState, workspace::Workspace,
     };
+
+    #[test]
+    fn open_command_palette_from_app_enters_mode() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        assert_eq!(app.state.mode, Mode::CommandPalette);
+        assert!(!app.state.command_palette.entries.is_empty());
+    }
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {

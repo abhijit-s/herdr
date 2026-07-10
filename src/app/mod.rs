@@ -558,7 +558,11 @@ impl App {
             keybind_help: state::KeybindHelpState { scroll: 0 },
             navigator: state::NavigatorState::default(),
             command_palette: command_palette::CommandPaletteState::default(),
-            command_palette_sources: command_palette::SourceToggles::all(),
+            command_palette_sources: command_palette::SourceToggles {
+                built_in: config.command_palette.sources.built_in,
+                plugin: config.command_palette.sources.plugin,
+                custom: config.command_palette.sources.custom,
+            },
             copy_mode: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,

@@ -315,6 +315,35 @@ impl CommandPaletteState {
     }
 }
 
+/// Availability-filtered plugin actions as palette entries. Reuses the
+/// `manifest_actions` availability filter (not the raw plugin map).
+pub(crate) fn plugin_entries_from_registry(
+    plugins: &crate::app::state::InstalledPluginRegistry,
+) -> Vec<CommandEntry> {
+    crate::app::api::plugins::palette_plugin_actions(plugins)
+        .into_iter()
+        .map(|info| CommandEntry {
+            name: info.title.clone(),
+            description: info.description.clone(),
+            source: CommandSource::Plugin,
+            handle: CommandHandle::Plugin(info.qualified_id()),
+        })
+        .collect()
+}
+
+/// User-defined `[[keys.command]]` custom commands as palette entries.
+pub(crate) fn custom_entries_from_config(customs: &[CustomCommandKeybind]) -> Vec<CommandEntry> {
+    customs
+        .iter()
+        .map(|kb| CommandEntry {
+            name: kb.label.clone(),
+            description: kb.description.clone(),
+            source: CommandSource::Custom,
+            handle: CommandHandle::Custom(Box::new(kb.clone())),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
