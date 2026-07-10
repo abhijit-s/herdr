@@ -557,6 +557,8 @@ impl App {
             }),
             keybind_help: state::KeybindHelpState { scroll: 0 },
             navigator: state::NavigatorState::default(),
+            command_palette: command_palette::CommandPaletteState::default(),
+            command_palette_sources: command_palette::SourceToggles::all(),
             copy_mode: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,
@@ -1703,6 +1705,7 @@ impl App {
             Mode::Navigator => {
                 input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event);
             }
+            Mode::CommandPalette => {}
             Mode::Terminal => {
                 // Should not be called in terminal mode.
             }
