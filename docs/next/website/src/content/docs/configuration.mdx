@@ -150,6 +150,7 @@ The default keymap is prefix-first and avoids direct shortcuts that can steal in
 detach = "prefix+q"
 workspace_picker = "prefix+w"
 goto = "prefix+g"
+command_palette = "prefix+:"
 new_workspace = "prefix+shift+n"
 new_worktree = "prefix+shift+g"
 rename_workspace = "prefix+shift+w"
@@ -206,6 +207,21 @@ next_tab = ["prefix+n", "ctrl+alt+]"]
 Key strings accept plain keys, modifier combinations such as `ctrl+a`, `shift+n`, `alt+1`, `cmd+k`, and special keys such as `enter`, `tab`, `esc`, `left`, `right`, `up`, and `down`. Named punctuation such as `minus`, `comma`, `ampersand`, `plus`, and `backtick` is also accepted. Plain direct printable keys such as `n` are unsafe because they intercept typing; use `prefix+n` unless you intentionally want a direct binding. The `navigate_workspace_*` and `navigate_pane_*` fields are navigate-mode-only and may use plain keys such as `j` or `k`; they must not use `prefix+`, `esc`, `enter`, `tab`, `shift+tab`, `left`, `right`, or unmodified `1` through `9`. Left and right arrows are permanent aliases for pane-left and pane-right navigation. These navigate-mode shortcuts are independent from general action bindings such as `focus_pane_down = "prefix+j"`; when both use the same key, the navigate-mode shortcut wins while navigate mode is open. Alt, Cmd/Super, and punctuation with modifiers depend on your terminal and tmux settings.
 
 If you have old custom keybindings and want the new defaults, run `herdr config reset-keys`. Herdr backs up `config.toml`, removes `[keys]` and `[[keys.command]]`, and uses built-in v2 defaults after restart or `herdr server reload-config`.
+
+## Command palette
+
+`command_palette` (default `prefix+:`) opens a floating command palette that fuzzy-filters a live catalog of commands and runs the one you pick through Herdr's normal execution path. Type to narrow the list, `↑`/`↓` (or `ctrl+p`/`ctrl+n`) to move, `↵` to run, and `esc` to cancel. Unbind it (`command_palette = ""`) to disable the feature entirely.
+
+The catalog merges three sources, each shown with a dim right-aligned tag: built-in navigation and pane commands (`built-in`), actions contributed by installed plugins (`plugin`), and your `[[keys.command]]` custom commands (`custom`). An arg-taking built-in such as `rename-workspace` or `workspace-picker` opens its existing overlay; a no-arg command such as `zoom` runs and closes the palette.
+
+Choose which sources feed the palette with `[command_palette].sources` (all enabled by default):
+
+```toml
+[command_palette]
+sources = { built_in = true, plugin = true, custom = true }
+```
+
+The native palette **supersedes the `jt.command-palette` plugin** — unlink it with `herdr plugin unlink jt.command-palette` to avoid a duplicate. The separate `local.smart-send` plugin is unrelated and continues to work.
 
 ## Indexed jumps
 
