@@ -342,8 +342,21 @@ impl CommandPaletteState {
             .and_then(|&i| self.entries.get(i))
     }
 
-    /// Clamp-move selection (no wrap).
+    /// Wrap-move selection by `delta` (single-step Up/Down/Ctrl+p/Ctrl+n): moving
+    /// past the last row wraps to the first, and past the first wraps to the last.
     pub(crate) fn move_selection(&mut self, delta: i32) {
+        if self.filtered.is_empty() {
+            self.selected = 0;
+            return;
+        }
+        let len = self.filtered.len() as i32;
+        let next = (self.selected as i32 + delta).rem_euclid(len);
+        self.selected = next as usize;
+    }
+
+    /// Clamp-move selection by `delta` (half-/full-page jumps): clamps to the
+    /// list bounds and never wraps.
+    pub(crate) fn jump_clamped(&mut self, delta: i32) {
         if self.filtered.is_empty() {
             self.selected = 0;
             return;
@@ -351,6 +364,16 @@ impl CommandPaletteState {
         let max = self.filtered.len() - 1;
         let next = (self.selected as i32 + delta).clamp(0, max as i32);
         self.selected = next as usize;
+    }
+
+    /// Jump to the first row (Home).
+    pub(crate) fn select_first(&mut self) {
+        self.selected = 0;
+    }
+
+    /// Jump to the last row (End). Empty list stays at 0.
+    pub(crate) fn select_last(&mut self) {
+        self.selected = self.filtered.len().saturating_sub(1);
     }
 }
 
@@ -521,14 +544,58 @@ mod tests {
     }
 
     #[test]
-    fn move_selection_clamps_without_wrap() {
+    fn move_selection_wraps_around() {
         let mut state = CommandPaletteState::default();
         state.assemble(SourceToggles::all(), &Keybinds::default(), vec![], vec![]);
-        state.move_selection(-1);
-        assert_eq!(state.selected, 0); // no wrap to bottom
         let n = state.filtered.len();
-        state.move_selection(1000);
-        assert_eq!(state.selected, n.saturating_sub(1)); // clamps at end
+        assert!(n > 1, "catalog should hold more than one entry");
+        // from row 0, a single step up wraps to the last row
+        state.move_selection(-1);
+        assert_eq!(state.selected, n - 1);
+        // from the last row, a single step down wraps back to row 0
+        state.move_selection(1);
+        assert_eq!(state.selected, 0);
+        // empty list stays put
+        let mut empty = CommandPaletteState::default();
+        empty.move_selection(1);
+        assert_eq!(empty.selected, 0);
+    }
+
+    #[test]
+    fn jump_clamped_clamps_at_both_ends_without_wrap() {
+        let mut state = CommandPaletteState::default();
+        state.assemble(SourceToggles::all(), &Keybinds::default(), vec![], vec![]);
+        let n = state.filtered.len();
+        assert!(n > 4, "catalog should hold several entries");
+        // from the middle, moves by the delta
+        state.selected = 2;
+        state.jump_clamped(1);
+        assert_eq!(state.selected, 3);
+        // near the top, a large negative jump clamps to 0 (does NOT wrap to the end)
+        state.selected = 1;
+        state.jump_clamped(-1000);
+        assert_eq!(state.selected, 0);
+        // near the bottom, a large positive jump clamps to the last row (no wrap)
+        state.selected = n - 2;
+        state.jump_clamped(1000);
+        assert_eq!(state.selected, n - 1);
+    }
+
+    #[test]
+    fn select_first_and_last_land_on_ends() {
+        let mut state = CommandPaletteState::default();
+        state.assemble(SourceToggles::all(), &Keybinds::default(), vec![], vec![]);
+        let n = state.filtered.len();
+        state.select_last();
+        assert_eq!(state.selected, n - 1);
+        state.select_first();
+        assert_eq!(state.selected, 0);
+        // empty list stays at 0 for both
+        let mut empty = CommandPaletteState::default();
+        empty.select_last();
+        assert_eq!(empty.selected, 0);
+        empty.select_first();
+        assert_eq!(empty.selected, 0);
     }
 
     #[test]
