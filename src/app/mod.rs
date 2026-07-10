@@ -1709,7 +1709,9 @@ impl App {
             Mode::Navigator => {
                 input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event);
             }
-            Mode::CommandPalette => {}
+            Mode::CommandPalette => {
+                crate::app::input::modal::handle_command_palette_key(self, key_event);
+            }
             Mode::Terminal => {
                 // Should not be called in terminal mode.
             }
