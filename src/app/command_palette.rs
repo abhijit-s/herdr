@@ -63,6 +63,9 @@ pub(crate) enum CommandHandle {
 #[derive(Debug, Clone)]
 pub(crate) struct CommandEntry {
     pub name: String,
+    /// Reserved for display: collected from every source but not yet shown in
+    /// the single-line row layout (mirrors the `Palette` reserved-field pattern).
+    #[allow(dead_code)]
     pub description: Option<String>,
     pub source: CommandSource,
     pub handle: CommandHandle,
@@ -240,6 +243,7 @@ pub(crate) struct SourceToggles {
 }
 
 impl SourceToggles {
+    #[cfg(test)]
     pub(crate) fn all() -> Self {
         Self {
             built_in: true,
