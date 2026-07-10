@@ -51,7 +51,7 @@ pub(crate) fn fuzzy_score(query: &str, name: &str) -> Option<i32> {
 }
 
 use crate::app::input::navigate::NavigateAction;
-use crate::config::CustomCommandKeybind;
+use crate::config::{CustomCommandKeybind, Keybinds};
 
 #[derive(Debug, Clone)]
 pub(crate) enum CommandHandle {
@@ -63,10 +63,11 @@ pub(crate) enum CommandHandle {
 #[derive(Debug, Clone)]
 pub(crate) struct CommandEntry {
     pub name: String,
-    /// Reserved for display: collected from every source but not yet shown in
-    /// the single-line row layout (mirrors the `Palette` reserved-field pattern).
-    #[allow(dead_code)]
+    /// Dimmed secondary text drawn between the name and the keybind/tag columns.
     pub description: Option<String>,
+    /// Right-aligned shortcut, populated for built-ins only. Custom entries show
+    /// their chord as the `name`, so their keybind column stays blank.
+    pub keybinding: Option<String>,
     pub source: CommandSource,
     pub handle: CommandHandle,
 }
@@ -106,87 +107,103 @@ pub(crate) enum BuiltinDisposition {
 /// `all_builtin_actions()`. Because both expand from the same rows they can
 /// never diverge.
 macro_rules! builtin_catalog {
-    // Base case: emit both functions from the accumulated tokens.
-    (@munch [$($arm:tt)*] [$($ctor:tt)*] ) => {
+    // Base case: emit all three functions from the accumulated tokens.
+    (@munch [$($arm:tt)*] [$($ctor:tt)*] [$($kb:tt)*] ) => {
         pub(crate) fn builtin_disposition(a: &NavigateAction) -> BuiltinDisposition {
             match a { $($arm)* }
         }
         fn all_builtin_actions() -> Vec<NavigateAction> {
             vec![ $($ctor)* ]
         }
+        /// Maps a built-in action to the accessor that reads its bound chord.
+        /// Same-source-of-truth as `builtin_disposition`: a new upstream
+        /// `NavigateAction` variant fails to compile until it gets a catalog row,
+        /// so the keybind column cannot silently drift from the entry table.
+        #[allow(clippy::type_complexity)]
+        fn builtin_keybind_accessor(a: &NavigateAction) -> Option<fn(&Keybinds) -> Option<String>> {
+            match a { $($kb)* }
+        }
+        /// Human keybind label for a built-in action (e.g. `"prefix+z"`), read
+        /// from the live parsed keybinds. `None` when the action is unbound.
+        pub(crate) fn builtin_keybind_label(kb: &Keybinds, a: &NavigateAction) -> Option<String> {
+            builtin_keybind_accessor(a).and_then(|read| read(kb))
+        }
     };
 
-    // Directly-invokable row.
-    (@munch [$($arm:tt)*] [$($ctor:tt)*] entry $v:ident $nm:literal $desc:literal ; $($rest:tt)* ) => {
+    // Directly-invokable row. `$field` names the `Keybinds` field that binds it.
+    (@munch [$($arm:tt)*] [$($ctor:tt)*] [$($kb:tt)*] entry $v:ident $field:ident $nm:literal $desc:literal ; $($rest:tt)* ) => {
         builtin_catalog!(@munch
             [$($arm)* NavigateAction::$v => BuiltinDisposition::Entry { name: $nm, description: $desc },]
             [$($ctor)* NavigateAction::$v,]
+            [$($kb)* NavigateAction::$v => Some(|kb: &Keybinds| kb.$field.label()),]
             $($rest)*);
     };
 
     // Index-bearing row → route to an existing picker (placeholder index; only identity matters).
-    (@munch [$($arm:tt)*] [$($ctor:tt)*] picker $v:ident $target:ident ; $($rest:tt)* ) => {
+    (@munch [$($arm:tt)*] [$($ctor:tt)*] [$($kb:tt)*] picker $v:ident $target:ident ; $($rest:tt)* ) => {
         builtin_catalog!(@munch
             [$($arm)* NavigateAction::$v(_) => BuiltinDisposition::RouteToPicker(NavigateAction::$target),]
             [$($ctor)* NavigateAction::$v(0),]
+            [$($kb)* NavigateAction::$v(_) => None,]
             $($rest)*);
     };
 
     // Deliberately hidden row (still enumerated so the match stays exhaustive).
-    (@munch [$($arm:tt)*] [$($ctor:tt)*] exclude $v:ident ; $($rest:tt)* ) => {
+    (@munch [$($arm:tt)*] [$($ctor:tt)*] [$($kb:tt)*] exclude $v:ident ; $($rest:tt)* ) => {
         builtin_catalog!(@munch
             [$($arm)* NavigateAction::$v => BuiltinDisposition::Exclude,]
             [$($ctor)* NavigateAction::$v,]
+            [$($kb)* NavigateAction::$v => None,]
             $($rest)*);
     };
 
-    // Entry point: start the muncher with two empty accumulators.
-    ( $($rows:tt)* ) => { builtin_catalog!(@munch [] [] $($rows)*); };
+    // Entry point: start the muncher with three empty accumulators.
+    ( $($rows:tt)* ) => { builtin_catalog!(@munch [] [] [] $($rows)*); };
 }
 
 builtin_catalog! {
-    entry NewWorkspace           "new-workspace"            "Create a new workspace";
-    entry NewWorktree            "new-worktree"             "Create a new linked worktree";
-    entry OpenWorktree           "open-worktree"            "Open an existing worktree";
-    entry RemoveWorktree         "remove-worktree"          "Remove a worktree";
-    entry RenameWorkspace        "rename-workspace"         "Rename the current workspace";
-    entry CloseWorkspace         "close-workspace"          "Close the current workspace";
-    entry WorkspacePicker        "workspace-picker"         "Pick a workspace";
-    entry PreviousWorkspace      "previous-workspace"       "Switch to the previous workspace";
-    entry NextWorkspace          "next-workspace"           "Switch to the next workspace";
-    entry PreviousAgent          "previous-agent"           "Focus the previous agent";
-    entry NextAgent              "next-agent"               "Focus the next agent";
-    entry NewTab                 "new-tab"                  "Create a new tab";
-    entry RenameTab              "rename-tab"               "Rename the current tab";
-    entry PreviousTab            "previous-tab"             "Switch to the previous tab";
-    entry NextTab                "next-tab"                 "Switch to the next tab";
-    entry CloseTab               "close-tab"                "Close the current tab";
-    entry RenamePane             "rename-pane"              "Rename the current pane";
-    entry FocusPaneLeft          "focus-pane-left"          "Focus the pane to the left";
-    entry FocusPaneDown          "focus-pane-down"          "Focus the pane below";
-    entry FocusPaneUp            "focus-pane-up"            "Focus the pane above";
-    entry FocusPaneRight         "focus-pane-right"         "Focus the pane to the right";
-    entry SwapPaneLeft           "swap-pane-left"           "Swap with the pane to the left";
-    entry SwapPaneDown           "swap-pane-down"           "Swap with the pane below";
-    entry SwapPaneUp             "swap-pane-up"             "Swap with the pane above";
-    entry SwapPaneRight          "swap-pane-right"          "Swap with the pane to the right";
-    entry SplitVertical          "split-vertical"           "Split the pane vertically";
-    entry SplitHorizontal        "split-horizontal"         "Split the pane horizontally";
-    entry ClosePane              "close-pane"               "Close the current pane";
-    entry EditScrollback         "edit-scrollback"          "Edit the scrollback buffer";
-    entry CopyMode               "copy-mode"                "Enter copy mode";
-    entry Zoom                   "zoom"                     "Toggle pane zoom";
-    entry EnterResizeMode        "resize-mode"              "Enter pane resize mode";
-    entry ToggleSidebar          "toggle-sidebar"           "Toggle the sidebar";
-    entry CyclePaneNext          "cycle-pane-next"          "Cycle to the next pane";
-    entry CyclePanePrevious      "cycle-pane-previous"      "Cycle to the previous pane";
-    entry LastPane               "last-pane"                "Focus the last active pane";
-    entry Help                   "help"                     "Open keybinding help";
-    entry Settings               "settings"                 "Open settings";
-    entry ReloadConfig           "reload-config"            "Reload configuration";
-    entry OpenNotificationTarget "open-notification-target" "Jump to the notification target";
-    entry Detach                 "detach"                   "Detach from the session";
-    entry OpenNavigator          "navigator"                "Open the navigator";
+    entry NewWorkspace           new_workspace            "new-workspace"            "Create a new workspace";
+    entry NewWorktree            new_worktree             "new-worktree"             "Create a new linked worktree";
+    entry OpenWorktree           open_worktree            "open-worktree"            "Open an existing worktree";
+    entry RemoveWorktree         remove_worktree          "remove-worktree"          "Remove a worktree";
+    entry RenameWorkspace        rename_workspace         "rename-workspace"         "Rename the current workspace";
+    entry CloseWorkspace         close_workspace          "close-workspace"          "Close the current workspace";
+    entry WorkspacePicker        workspace_picker         "workspace-picker"         "Pick a workspace";
+    entry PreviousWorkspace      previous_workspace       "previous-workspace"       "Switch to the previous workspace";
+    entry NextWorkspace          next_workspace           "next-workspace"           "Switch to the next workspace";
+    entry PreviousAgent          previous_agent           "previous-agent"           "Focus the previous agent";
+    entry NextAgent              next_agent               "next-agent"               "Focus the next agent";
+    entry NewTab                 new_tab                  "new-tab"                  "Create a new tab";
+    entry RenameTab              rename_tab               "rename-tab"               "Rename the current tab";
+    entry PreviousTab            previous_tab             "previous-tab"             "Switch to the previous tab";
+    entry NextTab                next_tab                 "next-tab"                 "Switch to the next tab";
+    entry CloseTab               close_tab                "close-tab"                "Close the current tab";
+    entry RenamePane             rename_pane              "rename-pane"              "Rename the current pane";
+    entry FocusPaneLeft          focus_pane_left          "focus-pane-left"          "Focus the pane to the left";
+    entry FocusPaneDown          focus_pane_down          "focus-pane-down"          "Focus the pane below";
+    entry FocusPaneUp            focus_pane_up            "focus-pane-up"            "Focus the pane above";
+    entry FocusPaneRight         focus_pane_right         "focus-pane-right"         "Focus the pane to the right";
+    entry SwapPaneLeft           swap_pane_left           "swap-pane-left"           "Swap with the pane to the left";
+    entry SwapPaneDown           swap_pane_down           "swap-pane-down"           "Swap with the pane below";
+    entry SwapPaneUp             swap_pane_up             "swap-pane-up"             "Swap with the pane above";
+    entry SwapPaneRight          swap_pane_right          "swap-pane-right"          "Swap with the pane to the right";
+    entry SplitVertical          split_vertical           "split-vertical"           "Split the pane vertically";
+    entry SplitHorizontal        split_horizontal         "split-horizontal"         "Split the pane horizontally";
+    entry ClosePane              close_pane               "close-pane"               "Close the current pane";
+    entry EditScrollback         edit_scrollback          "edit-scrollback"          "Edit the scrollback buffer";
+    entry CopyMode               copy_mode                "copy-mode"                "Enter copy mode";
+    entry Zoom                   zoom                     "zoom"                     "Toggle pane zoom";
+    entry EnterResizeMode        resize_mode              "resize-mode"              "Enter pane resize mode";
+    entry ToggleSidebar          toggle_sidebar           "toggle-sidebar"           "Toggle the sidebar";
+    entry CyclePaneNext          cycle_pane_next          "cycle-pane-next"          "Cycle to the next pane";
+    entry CyclePanePrevious      cycle_pane_previous      "cycle-pane-previous"      "Cycle to the previous pane";
+    entry LastPane               last_pane                "last-pane"                "Focus the last active pane";
+    entry Help                   help                     "help"                     "Open keybinding help";
+    entry Settings               settings                 "settings"                 "Open settings";
+    entry ReloadConfig           reload_config            "reload-config"            "Reload configuration";
+    entry OpenNotificationTarget open_notification_target "open-notification-target" "Jump to the notification target";
+    entry Detach                 detach                   "detach"                   "Detach from the session";
+    entry OpenNavigator          goto                     "navigator"                "Open the navigator";
 
     // hidden: opening the palette from within the palette is meaningless.
     exclude OpenCommandPalette;
@@ -197,19 +214,21 @@ builtin_catalog! {
     picker FocusAgent      OpenNavigator;
 }
 
-pub(crate) fn builtin_entries() -> Vec<CommandEntry> {
+pub(crate) fn builtin_entries(keybinds: &Keybinds) -> Vec<CommandEntry> {
     let mut entries: Vec<CommandEntry> = all_builtin_actions()
         .into_iter()
         .filter_map(|action| match builtin_disposition(&action) {
             BuiltinDisposition::Entry { name, description } => Some(CommandEntry {
                 name: name.to_string(),
                 description: Some(description.to_string()),
+                keybinding: builtin_keybind_label(keybinds, &action),
                 source: CommandSource::BuiltIn,
                 handle: CommandHandle::Navigate(action),
             }),
             BuiltinDisposition::RouteToPicker(target) => Some(CommandEntry {
                 name: picker_entry_name(&target),
                 description: Some(picker_entry_desc(&target)),
+                keybinding: builtin_keybind_label(keybinds, &target),
                 source: CommandSource::BuiltIn,
                 handle: CommandHandle::Navigate(target),
             }),
@@ -268,12 +287,13 @@ impl CommandPaletteState {
     pub(crate) fn assemble(
         &mut self,
         toggles: SourceToggles,
+        keybinds: &Keybinds,
         plugin_entries: Vec<CommandEntry>,
         custom_entries: Vec<CommandEntry>,
     ) {
         let mut entries: Vec<CommandEntry> = Vec::new();
         if toggles.built_in {
-            entries.extend(builtin_entries());
+            entries.extend(builtin_entries(keybinds));
         }
         if toggles.plugin {
             entries.extend(plugin_entries);
@@ -344,6 +364,7 @@ pub(crate) fn plugin_entries_from_registry(
         .map(|info| CommandEntry {
             name: info.title.clone(),
             description: info.description.clone(),
+            keybinding: None,
             source: CommandSource::Plugin,
             handle: CommandHandle::Plugin(info.qualified_id()),
         })
@@ -357,6 +378,9 @@ pub(crate) fn custom_entries_from_config(customs: &[CustomCommandKeybind]) -> Ve
         .map(|kb| CommandEntry {
             name: kb.label.clone(),
             description: kb.description.clone(),
+            // Custom entries surface their chord as the `name`; leave the keybind
+            // column blank so it is not duplicated.
+            keybinding: None,
             source: CommandSource::Custom,
             handle: CommandHandle::Custom(Box::new(kb.clone())),
         })
@@ -381,7 +405,7 @@ mod tests {
 
     #[test]
     fn builtin_catalog_covers_actions_and_routes_index_variants() {
-        let entries = builtin_entries();
+        let entries = builtin_entries(&Keybinds::default());
         // every entry is a built-in, alphabetical, with a non-empty name
         assert!(entries.iter().all(|e| e.source == CommandSource::BuiltIn));
         assert!(entries.windows(2).all(|w| w[0].name <= w[1].name));
@@ -395,11 +419,42 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn keybind_resolves_for_builtins_and_is_blank_for_other_sources() {
+        let kb = Keybinds::default();
+        // a representative built-in resolves to its configured chord
+        assert_eq!(
+            builtin_keybind_label(&kb, &NavigateAction::Zoom).as_deref(),
+            Some("prefix+z")
+        );
+        // the palette entry for it carries the same string
+        let zoom = builtin_entries(&kb)
+            .into_iter()
+            .find(|e| e.name == "zoom")
+            .expect("zoom entry present");
+        assert_eq!(zoom.keybinding.as_deref(), Some("prefix+z"));
+        // an unbound-by-default built-in yields no keybind column
+        assert!(builtin_keybind_label(&kb, &NavigateAction::OpenWorktree).is_none());
+        // a custom command surfaces its chord as the name, never in the keybind column
+        let customs = vec![CustomCommandKeybind {
+            bindings: crate::config::ActionKeybinds::default(),
+            label: "prefix+ctrl+j".to_string(),
+            command: "swap-pane-down".to_string(),
+            action: crate::config::CustomCommandAction::Pane,
+            description: Some("swap pane down".to_string()),
+        }];
+        let custom = custom_entries_from_config(&customs);
+        assert_eq!(custom.len(), 1);
+        assert_eq!(custom[0].name, "prefix+ctrl+j");
+        assert!(custom[0].keybinding.is_none());
+    }
+
     fn plugin_entries_from(v: Vec<(String, String, Option<String>)>) -> Vec<CommandEntry> {
         v.into_iter()
             .map(|(id, title, desc)| CommandEntry {
                 name: title,
                 description: desc,
+                keybinding: None,
                 source: CommandSource::Plugin,
                 handle: CommandHandle::Plugin(id),
             })
@@ -413,10 +468,16 @@ mod tests {
         let custom: Vec<CommandEntry> = vec![CommandEntry {
             name: "deploy".to_string(),
             description: None,
+            keybinding: None,
             source: CommandSource::Custom,
             handle: CommandHandle::Plugin("acme.deploy".to_string()),
         }];
-        state.assemble(SourceToggles::all(), plugin_entries_from(plugin), custom);
+        state.assemble(
+            SourceToggles::all(),
+            &Keybinds::default(),
+            plugin_entries_from(plugin),
+            custom,
+        );
         // sorted alphabetically across all sources
         assert!(state.entries.windows(2).all(|w| w[0].name <= w[1].name));
         // a plugin entry survived and carries its source tag
@@ -432,6 +493,7 @@ mod tests {
                 plugin: true,
                 custom: false,
             },
+            &Keybinds::default(),
             plugin_entries_from(vec![("acme.build".to_string(), "build".to_string(), None)]),
             vec![],
         );
@@ -446,7 +508,7 @@ mod tests {
     #[test]
     fn move_selection_clamps_without_wrap() {
         let mut state = CommandPaletteState::default();
-        state.assemble(SourceToggles::all(), vec![], vec![]);
+        state.assemble(SourceToggles::all(), &Keybinds::default(), vec![], vec![]);
         state.move_selection(-1);
         assert_eq!(state.selected, 0); // no wrap to bottom
         let n = state.filtered.len();
@@ -468,6 +530,7 @@ mod tests {
                 plugin: true,
                 custom: false,
             },
+            &Keybinds::default(),
             plugins,
             vec![],
         );

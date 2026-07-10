@@ -29,6 +29,91 @@ pub(crate) fn truncate_ellipsis(s: &str, max: usize) -> String {
     format!("{keep}…")
 }
 
+/// Which column a rendered row segment belongs to (drives its style).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowSpanKind {
+    Name,
+    Description,
+    Keybind,
+    Tag,
+    Pad,
+}
+
+/// Width-budget one palette row into styled segments that together occupy
+/// exactly `width` columns (or fewer only when `width` cannot hold the name).
+///
+/// Priority when space is tight: the source `tag` and `name` are kept, the
+/// `keybinding` is dropped next, and the `description` yields first. The right
+/// cluster (keybind + tag) is pushed to the right edge with a `Pad` fill.
+pub(crate) fn command_palette_row(
+    name: &str,
+    description: Option<&str>,
+    keybinding: Option<&str>,
+    tag: &str,
+    width: usize,
+) -> Vec<(RowSpanKind, String)> {
+    let mut out: Vec<(RowSpanKind, String)> = Vec::new();
+    if width == 0 {
+        return out;
+    }
+    let lead = 1usize;
+    let tag_w = tag.chars().count();
+    let kb = keybinding.filter(|s| !s.is_empty());
+    let kb_w = kb.map(|s| s.chars().count()).unwrap_or(0);
+
+    // Decide which right-side columns fit. Reserve `lead + >=1 name col + gap`.
+    let with_kb = kb_w + 2 + tag_w; // keybind + 2-col gap + tag
+    let (show_kb, right_w) = if kb.is_some() && width >= lead + 2 + with_kb {
+        (true, with_kb)
+    } else if width >= lead + 2 + tag_w {
+        (false, tag_w)
+    } else {
+        (false, 0) // too narrow even for the tag → name only
+    };
+
+    out.push((RowSpanKind::Pad, " ".repeat(lead)));
+
+    if right_w == 0 {
+        out.push((
+            RowSpanKind::Name,
+            truncate_ellipsis(name, width.saturating_sub(lead)),
+        ));
+        return out;
+    }
+
+    // Everything except the lead and the right cluster is the left region; the
+    // guaranteed >=1 gap before the right cluster lives inside the middle Pad.
+    let left_region = width - lead - right_w;
+    let name_shown = truncate_ellipsis(name, left_region.saturating_sub(1).max(1));
+    let name_len = name_shown.chars().count();
+    out.push((RowSpanKind::Name, name_shown));
+
+    // Description takes a leading gap + the remaining left-region columns.
+    let remaining = left_region.saturating_sub(name_len);
+    let mut desc_len = 0usize;
+    if let Some(d) = description.filter(|s| !s.is_empty()) {
+        if remaining >= 3 {
+            let shown = truncate_ellipsis(d, remaining - 1);
+            let seg = format!(" {shown}");
+            desc_len = seg.chars().count();
+            out.push((RowSpanKind::Description, seg));
+        }
+    }
+
+    // Slack pushes the right cluster to the edge; totals sum to exactly `width`.
+    let slack = width.saturating_sub(lead + name_len + desc_len + right_w);
+    out.push((RowSpanKind::Pad, " ".repeat(slack)));
+
+    if show_kb {
+        if let Some(k) = kb {
+            out.push((RowSpanKind::Keybind, k.to_string()));
+            out.push((RowSpanKind::Pad, "  ".to_string()));
+        }
+    }
+    out.push((RowSpanKind::Tag, tag.to_string()));
+    out
+}
+
 pub(crate) fn render_command_palette_overlay(app: &AppState, frame: &mut Frame) {
     let area = frame.area();
     let p = &app.palette;
@@ -66,22 +151,28 @@ pub(crate) fn render_command_palette_overlay(app: &AppState, frame: &mut Frame) 
         let entry = &cp.entries[visible[vis_idx]];
         let selected = vis_idx == cp.selected;
         let row_area = Rect::new(list_area.x, list_area.y + row as u16, list_area.width, 1);
-        let tag = entry.source.tag();
-        let name_w = (list_area.width as usize).saturating_sub(tag.len() + 3);
-        let name = truncate_ellipsis(&entry.name, name_w);
-        let line = Line::from(vec![
-            Span::raw(format!(" {name:<name_w$} ")),
-            Span::styled(
-                tag,
-                Style::default().fg(p.overlay0).add_modifier(Modifier::DIM),
-            ),
-        ]);
-        let style = if selected {
+        let base = if selected {
             Style::default().fg(p.text).bg(p.surface1)
         } else {
             Style::default().fg(p.subtext0)
         };
-        frame.render_widget(Paragraph::new(line).style(style), row_area);
+        let dim = base.fg(p.overlay0).add_modifier(Modifier::DIM);
+        let segments = command_palette_row(
+            &entry.name,
+            entry.description.as_deref(),
+            entry.keybinding.as_deref(),
+            entry.source.tag(),
+            list_area.width as usize,
+        );
+        let spans: Vec<Span> = segments
+            .into_iter()
+            .map(|(kind, text)| match kind {
+                RowSpanKind::Name | RowSpanKind::Pad => Span::styled(text, base),
+                RowSpanKind::Description | RowSpanKind::Tag => Span::styled(text, dim),
+                RowSpanKind::Keybind => Span::styled(text, base.fg(p.overlay1)),
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(Line::from(spans)).style(base), row_area);
     }
 }
 
@@ -105,5 +196,76 @@ mod tests {
     fn truncate_ellipsis_caps_width() {
         assert_eq!(truncate_ellipsis("rename-workspace", 8), "rename-…");
         assert_eq!(truncate_ellipsis("zoom", 8), "zoom");
+    }
+
+    fn row_width(segments: &[(RowSpanKind, String)]) -> usize {
+        segments.iter().map(|(_, s)| s.chars().count()).sum()
+    }
+
+    fn kind_text(segments: &[(RowSpanKind, String)], kind: RowSpanKind) -> Option<&str> {
+        segments
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, s)| s.as_str())
+    }
+
+    #[test]
+    fn command_palette_row_fits_all_four_fields_when_wide() {
+        let width = 60;
+        let seg = command_palette_row("zoom", Some("Toggle pane zoom"), Some("prefix+z"), "built-in", width);
+        // occupies exactly the available width
+        assert_eq!(row_width(&seg), width);
+        // every column is present and un-truncated at a comfortable width
+        assert_eq!(kind_text(&seg, RowSpanKind::Name), Some("zoom"));
+        assert_eq!(kind_text(&seg, RowSpanKind::Keybind), Some("prefix+z"));
+        assert_eq!(kind_text(&seg, RowSpanKind::Tag), Some("built-in"));
+        assert!(kind_text(&seg, RowSpanKind::Description)
+            .unwrap()
+            .contains("Toggle pane zoom"));
+    }
+
+    #[test]
+    fn command_palette_row_description_yields_first_when_tight() {
+        // enough for name + keybind + tag, but not the description
+        let seg = command_palette_row(
+            "rename-workspace",
+            Some("Rename the current workspace"),
+            Some("prefix+,"),
+            "built-in",
+            34,
+        );
+        assert!(row_width(&seg) <= 34);
+        assert_eq!(kind_text(&seg, RowSpanKind::Tag), Some("built-in"));
+        assert_eq!(kind_text(&seg, RowSpanKind::Keybind), Some("prefix+,"));
+        // description dropped before name/keybind are sacrificed
+        assert!(kind_text(&seg, RowSpanKind::Description).is_none());
+    }
+
+    #[test]
+    fn command_palette_row_never_overflows_narrow_width() {
+        // sweep narrow widths; the row must never exceed the budget
+        for width in 1..=30usize {
+            let seg = command_palette_row(
+                "open-notification-target",
+                Some("Jump to the notification target"),
+                Some("prefix+n"),
+                "built-in",
+                width,
+            );
+            assert!(
+                row_width(&seg) <= width,
+                "row overflowed at width {width}: {}",
+                row_width(&seg)
+            );
+        }
+    }
+
+    #[test]
+    fn command_palette_row_blank_keybind_shows_name_and_tag_only() {
+        let seg = command_palette_row("build", None, None, "custom", 40);
+        assert_eq!(row_width(&seg), 40);
+        assert!(kind_text(&seg, RowSpanKind::Keybind).is_none());
+        assert_eq!(kind_text(&seg, RowSpanKind::Name), Some("build"));
+        assert_eq!(kind_text(&seg, RowSpanKind::Tag), Some("custom"));
     }
 }

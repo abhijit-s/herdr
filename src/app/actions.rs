@@ -376,7 +376,7 @@ impl AppState {
         custom_entries: Vec<crate::app::command_palette::CommandEntry>,
     ) {
         self.command_palette
-            .assemble(toggles, plugin_entries, custom_entries);
+            .assemble(toggles, &self.keybinds, plugin_entries, custom_entries);
         self.mode = Mode::CommandPalette;
     }
 
