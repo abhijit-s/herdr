@@ -339,18 +339,10 @@ pub struct Config {
 }
 
 /// Native command palette configuration (`[command_palette]`).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct CommandPaletteConfig {
     pub sources: CommandPaletteSources,
-}
-
-impl Default for CommandPaletteConfig {
-    fn default() -> Self {
-        Self {
-            sources: CommandPaletteSources::default(),
-        }
-    }
 }
 
 /// Which catalog sources feed the command palette. All enabled by default.
