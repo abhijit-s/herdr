@@ -189,6 +189,50 @@ impl App {
         self.state.open_command_palette(toggles, plugin, custom);
     }
 
+    /// Invoke the selected palette entry through the existing execution path.
+    /// Invoked from `Mode::CommandPalette` (never pre-set to Terminal): the
+    /// palette is a sentinel no catalog action transitions to, so
+    /// `finish_action_context` never mis-fires `leave_command_mode` for a
+    /// mode-changing action. A non-transitioning action leaves mode at the
+    /// sentinel — the post-invoke guard then closes the palette.
+    pub(crate) fn dispatch_command_palette_entry(&mut self) {
+        use crate::app::command_palette::CommandHandle;
+        let handle = match self.state.command_palette.selected_entry() {
+            Some(entry) => entry.handle.clone(),
+            None => return, // empty list → no-op
+        };
+        match handle {
+            CommandHandle::Navigate(action) => {
+                self.execute_tui_navigate_action(action, ActionContext::Prefix);
+            }
+            CommandHandle::Plugin(qualified_id) => {
+                if let Err(err) = self.invoke_plugin_action_from_keybind(qualified_id) {
+                    self.palette_dispatch_error("command failed", &err);
+                }
+            }
+            CommandHandle::Custom(binding) => {
+                self.launch_custom_command(*binding, ActionContext::Prefix);
+            }
+        }
+        // A non-transitioning action leaves mode at the palette sentinel — close
+        // it explicitly. A transitioning action already moved mode elsewhere.
+        if self.state.mode == Mode::CommandPalette {
+            self.state.mode = Mode::Terminal;
+        }
+    }
+
+    fn palette_dispatch_error(&mut self, title: &str, context: &str) {
+        let previous = self.state.toast.take();
+        self.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: title.to_string(),
+            context: context.to_string(),
+            position: None,
+            target: None,
+        });
+        self.sync_toast_deadline(previous);
+    }
+
     pub(super) fn execute_tui_navigate_action(
         &mut self,
         action: NavigateAction,
@@ -1877,6 +1921,36 @@ mod tests {
         app.state.mode = Mode::Prefix;
         app.execute_tui_navigate_action(NavigateAction::OpenCommandPalette, ActionContext::Prefix);
         assert_eq!(app.state.mode, Mode::CommandPalette);
+    }
+
+    #[test]
+    fn dispatch_built_in_entry_invokes_action_and_leaves_palette() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        // select the built-in that opens the navigator
+        let idx = app
+            .state
+            .command_palette
+            .filtered
+            .iter()
+            .position(|&i| app.state.command_palette.entries[i].name == "navigator")
+            .expect("navigator entry present");
+        app.state.command_palette.selected = idx;
+        app.dispatch_command_palette_entry();
+        // invoke-then-transition: the invoked action set the final mode
+        // (Navigator), NOT CommandPalette
+        assert_eq!(app.state.mode, Mode::Navigator);
+    }
+
+    #[test]
+    fn dispatch_on_empty_list_is_noop() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        app.state.command_palette.query = "zzz-no-match".to_string();
+        app.state.command_palette.refilter();
+        assert!(app.state.command_palette.filtered.is_empty());
+        app.dispatch_command_palette_entry();
+        assert_eq!(app.state.mode, Mode::CommandPalette); // still open, no-op
     }
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {

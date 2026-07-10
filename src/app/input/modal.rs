@@ -632,7 +632,7 @@ pub(crate) fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.state.command_palette.move_selection(1)
         }
-        KeyCode::Enter => {} // dispatch wired in Task 9
+        KeyCode::Enter => app.dispatch_command_palette_entry(),
         _ => {
             let cp = &mut app.state.command_palette;
             let changed = edit_text_buffer(&mut cp.query, &mut cp.replace_on_type, key);
