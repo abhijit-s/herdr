@@ -335,6 +335,41 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    pub command_palette: CommandPaletteConfig,
+}
+
+/// Native command palette configuration (`[command_palette]`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CommandPaletteConfig {
+    pub sources: CommandPaletteSources,
+}
+
+impl Default for CommandPaletteConfig {
+    fn default() -> Self {
+        Self {
+            sources: CommandPaletteSources::default(),
+        }
+    }
+}
+
+/// Which catalog sources feed the command palette. All enabled by default.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CommandPaletteSources {
+    pub built_in: bool,
+    pub plugin: bool,
+    pub custom: bool,
+}
+
+impl Default for CommandPaletteSources {
+    fn default() -> Self {
+        Self {
+            built_in: true,
+            plugin: true,
+            custom: true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -368,6 +403,8 @@ pub struct KeysConfig {
     pub workspace_picker: BindingConfig,
     /// Open the session navigator. Default: "prefix+g"
     pub goto: BindingConfig,
+    /// Open the command palette. Default: "prefix+:"
+    pub command_palette: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
     pub navigate_workspace_up: BindingConfig,
     /// Move workspace selection down in navigate mode. Default: "down".
@@ -488,6 +525,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     goto: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    command_palette: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_down: Option<BindingConfig>,
@@ -605,6 +644,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
         apply_field!(goto);
+        apply_field!(command_palette);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
         apply_field!(navigate_pane_left);
@@ -703,6 +743,7 @@ impl KeysConfig {
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
+        copy_effective_action_field!(command_palette, keybinds.command_palette);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
         copy_effective_action_field!(navigate_pane_left, keybinds.navigate.pane_left);
@@ -962,6 +1003,7 @@ impl Default for KeysConfig {
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),
+            command_palette: BindingConfig::one("prefix+:"),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
             navigate_pane_left: BindingConfig::one("h"),
@@ -1135,6 +1177,18 @@ impl Default for AdvancedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_palette_config_defaults_and_parses() {
+        let cfg: Config = toml::from_str("").expect("empty config parses");
+        assert_eq!(cfg.keys.command_palette, BindingConfig::one("prefix+:"));
+        assert!(cfg.command_palette.sources.built_in);
+        let cfg2: Config = toml::from_str(
+            "[command_palette]\nsources = { built_in = false, plugin = true, custom = true }\n",
+        )
+        .expect("parses");
+        assert!(!cfg2.command_palette.sources.built_in);
+    }
 
     #[test]
     fn update_config_defaults_and_parses() {
