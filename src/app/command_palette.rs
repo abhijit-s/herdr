@@ -217,6 +217,104 @@ fn picker_entry_desc(action: &NavigateAction) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SourceToggles {
+    pub built_in: bool,
+    pub plugin: bool,
+    pub custom: bool,
+}
+
+impl SourceToggles {
+    pub(crate) fn all() -> Self {
+        Self {
+            built_in: true,
+            plugin: true,
+            custom: true,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CommandPaletteState {
+    pub query: String,
+    pub replace_on_type: bool,
+    pub entries: Vec<CommandEntry>,
+    pub filtered: Vec<usize>, // indices into `entries`, ranked best-first
+    pub selected: usize,
+}
+
+impl CommandPaletteState {
+    /// Rebuild the full catalog from the three sources (respecting toggles),
+    /// then reset query/selection and refilter. Called on open.
+    pub(crate) fn assemble(
+        &mut self,
+        toggles: SourceToggles,
+        plugin_entries: Vec<CommandEntry>,
+        custom_entries: Vec<CommandEntry>,
+    ) {
+        let mut entries: Vec<CommandEntry> = Vec::new();
+        if toggles.built_in {
+            entries.extend(builtin_entries());
+        }
+        if toggles.plugin {
+            entries.extend(plugin_entries);
+        }
+        if toggles.custom {
+            entries.extend(custom_entries);
+        }
+        // Identity dedup: same handle, NOT same display name. Two plugins that
+        // both title an action "build" have distinct handles (different
+        // qualified_ids) and both survive; only a genuine duplicate handle is
+        // dropped. Order-independent seen-set (not adjacency-based `dedup_by`).
+        let mut seen = std::collections::HashSet::new();
+        entries.retain(|e| seen.insert(e.identity_key()));
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        self.entries = entries;
+        self.query.clear();
+        self.replace_on_type = false;
+        self.selected = 0;
+        self.refilter();
+    }
+
+    /// Recompute `filtered` from `query`; reset selection to row 0.
+    pub(crate) fn refilter(&mut self) {
+        let mut scored: Vec<(usize, i32)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| fuzzy_score(&self.query, &e.name).map(|s| (i, s)))
+            .collect();
+        // best score first; tie-break by name for determinism
+        scored.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| self.entries[a.0].name.cmp(&self.entries[b.0].name))
+        });
+        self.filtered = scored.into_iter().map(|(i, _)| i).collect();
+        self.selected = 0;
+    }
+
+    pub(crate) fn visible(&self) -> &[usize] {
+        &self.filtered
+    }
+
+    pub(crate) fn selected_entry(&self) -> Option<&CommandEntry> {
+        self.filtered
+            .get(self.selected)
+            .and_then(|&i| self.entries.get(i))
+    }
+
+    /// Clamp-move selection (no wrap).
+    pub(crate) fn move_selection(&mut self, delta: i32) {
+        if self.filtered.is_empty() {
+            self.selected = 0;
+            return;
+        }
+        let max = self.filtered.len() - 1;
+        let next = (self.selected as i32 + delta).clamp(0, max as i32);
+        self.selected = next as usize;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +345,85 @@ mod tests {
             builtin_disposition(&NavigateAction::SwitchWorkspace(0)),
             BuiltinDisposition::RouteToPicker(_)
         ));
+    }
+
+    fn plugin_entries_from(v: Vec<(String, String, Option<String>)>) -> Vec<CommandEntry> {
+        v.into_iter()
+            .map(|(id, title, desc)| CommandEntry {
+                name: title,
+                description: desc,
+                source: CommandSource::Plugin,
+                handle: CommandHandle::Plugin(id),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn assemble_merges_sources_dedups_by_identity_and_sorts() {
+        let mut state = CommandPaletteState::default();
+        let plugin = vec![("acme.build".to_string(), "build".to_string(), None)];
+        let custom: Vec<CommandEntry> = vec![CommandEntry {
+            name: "deploy".to_string(),
+            description: None,
+            source: CommandSource::Custom,
+            handle: CommandHandle::Plugin("acme.deploy".to_string()),
+        }];
+        state.assemble(SourceToggles::all(), plugin_entries_from(plugin), custom);
+        // sorted alphabetically across all sources
+        assert!(state.entries.windows(2).all(|w| w[0].name <= w[1].name));
+        // a plugin entry survived and carries its source tag
+        assert!(state
+            .entries
+            .iter()
+            .any(|e| e.source == CommandSource::Plugin && e.name == "build"));
+        // disabling built-ins drops them
+        let mut only_plugins = CommandPaletteState::default();
+        only_plugins.assemble(
+            SourceToggles {
+                built_in: false,
+                plugin: true,
+                custom: false,
+            },
+            plugin_entries_from(vec![("acme.build".to_string(), "build".to_string(), None)]),
+            vec![],
+        );
+        assert!(only_plugins
+            .entries
+            .iter()
+            .all(|e| e.source == CommandSource::Plugin));
+        // `visible` mirrors `filtered`
+        assert_eq!(only_plugins.visible().len(), only_plugins.filtered.len());
+    }
+
+    #[test]
+    fn move_selection_clamps_without_wrap() {
+        let mut state = CommandPaletteState::default();
+        state.assemble(SourceToggles::all(), vec![], vec![]);
+        state.move_selection(-1);
+        assert_eq!(state.selected, 0); // no wrap to bottom
+        let n = state.filtered.len();
+        state.move_selection(1000);
+        assert_eq!(state.selected, n.saturating_sub(1)); // clamps at end
+    }
+
+    #[test]
+    fn colliding_plugin_titles_are_not_deduped() {
+        // two DIFFERENT plugin actions that share the display title "build"
+        let plugins = plugin_entries_from(vec![
+            ("acme.build".to_string(), "build".to_string(), None),
+            ("other.build".to_string(), "build".to_string(), None),
+        ]);
+        let mut state = CommandPaletteState::default();
+        state.assemble(
+            SourceToggles {
+                built_in: false,
+                plugin: true,
+                custom: false,
+            },
+            plugins,
+            vec![],
+        );
+        // distinct qualified_ids → distinct identity keys → both survive
+        assert_eq!(state.entries.iter().filter(|e| e.name == "build").count(), 2);
     }
 }
