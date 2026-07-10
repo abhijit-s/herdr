@@ -92,6 +92,9 @@ pub(crate) enum BuiltinDisposition {
     /// An index-bearing action; the palette offers ONE entry that routes to the
     /// existing picker action instead of a fixed index.
     RouteToPicker(NavigateAction),
+    /// Deliberately not surfaced in the palette (internal/transient, e.g. the
+    /// action that opens the palette itself).
+    Exclude,
 }
 
 /// Single-source catalog macro (drift guard). One table generates BOTH the
@@ -123,6 +126,14 @@ macro_rules! builtin_catalog {
         builtin_catalog!(@munch
             [$($arm)* NavigateAction::$v(_) => BuiltinDisposition::RouteToPicker(NavigateAction::$target),]
             [$($ctor)* NavigateAction::$v(0),]
+            $($rest)*);
+    };
+
+    // Deliberately hidden row (still enumerated so the match stays exhaustive).
+    (@munch [$($arm:tt)*] [$($ctor:tt)*] exclude $v:ident ; $($rest:tt)* ) => {
+        builtin_catalog!(@munch
+            [$($arm)* NavigateAction::$v => BuiltinDisposition::Exclude,]
+            [$($ctor)* NavigateAction::$v,]
             $($rest)*);
     };
 
@@ -174,6 +185,9 @@ builtin_catalog! {
     entry Detach                 "detach"                   "Detach from the session";
     entry OpenNavigator          "navigator"                "Open the navigator";
 
+    // hidden: opening the palette from within the palette is meaningless.
+    exclude OpenCommandPalette;
+
     // index-bearing → route to an existing picker (never a fixed index):
     picker SwitchWorkspace WorkspacePicker;
     picker SwitchTab       OpenNavigator;
@@ -183,19 +197,20 @@ builtin_catalog! {
 pub(crate) fn builtin_entries() -> Vec<CommandEntry> {
     let mut entries: Vec<CommandEntry> = all_builtin_actions()
         .into_iter()
-        .map(|action| match builtin_disposition(&action) {
-            BuiltinDisposition::Entry { name, description } => CommandEntry {
+        .filter_map(|action| match builtin_disposition(&action) {
+            BuiltinDisposition::Entry { name, description } => Some(CommandEntry {
                 name: name.to_string(),
                 description: Some(description.to_string()),
                 source: CommandSource::BuiltIn,
                 handle: CommandHandle::Navigate(action),
-            },
-            BuiltinDisposition::RouteToPicker(target) => CommandEntry {
+            }),
+            BuiltinDisposition::RouteToPicker(target) => Some(CommandEntry {
                 name: picker_entry_name(&target),
                 description: Some(picker_entry_desc(&target)),
                 source: CommandSource::BuiltIn,
                 handle: CommandHandle::Navigate(target),
-            },
+            }),
+            BuiltinDisposition::Exclude => None,
         })
         .collect();
     entries.sort_by(|a, b| a.name.cmp(&b.name));

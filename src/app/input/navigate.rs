@@ -430,6 +430,7 @@ impl App {
             NavigateAction::OpenNavigator => {
                 self.state.open_navigator_from(&self.terminal_runtimes)
             }
+            NavigateAction::OpenCommandPalette => self.open_command_palette_from(),
         }
 
         finish_action_context(&mut self.state, context, previous_mode);
@@ -1335,6 +1336,7 @@ pub(crate) enum NavigateAction {
     OpenNotificationTarget,
     Detach,
     OpenNavigator,
+    OpenCommandPalette,
 }
 
 fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
@@ -1469,6 +1471,7 @@ fn non_indexed_action_for_key(
         ),
         (&kb.detach, NavigateAction::Detach),
         (&kb.goto, NavigateAction::OpenNavigator),
+        (&kb.command_palette, NavigateAction::OpenCommandPalette),
     ] {
         if action_matches(bindings, key, dispatch) {
             return Some(action);
@@ -1725,6 +1728,11 @@ pub(super) fn execute_navigate_action_in_context(
             leave_navigate_mode(state);
         }
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
+        NavigateAction::OpenCommandPalette => state.open_command_palette(
+            crate::app::command_palette::SourceToggles::all(),
+            Vec::new(),
+            Vec::new(),
+        ),
     }
 
     finish_action_context(state, context, previous_mode);
@@ -1861,6 +1869,14 @@ mod tests {
         app.open_command_palette_from();
         assert_eq!(app.state.mode, Mode::CommandPalette);
         assert!(!app.state.command_palette.entries.is_empty());
+    }
+
+    #[test]
+    fn dispatch_open_command_palette_action_enters_mode() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.state.mode = Mode::Prefix;
+        app.execute_tui_navigate_action(NavigateAction::OpenCommandPalette, ActionContext::Prefix);
+        assert_eq!(app.state.mode, Mode::CommandPalette);
     }
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
