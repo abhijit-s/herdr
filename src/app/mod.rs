@@ -9,6 +9,7 @@ mod agent_resume;
 mod agents;
 mod api;
 mod api_helpers;
+pub(crate) mod command_palette;
 mod config_io;
 mod creation;
 mod ids;
