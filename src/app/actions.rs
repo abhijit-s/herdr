@@ -366,6 +366,20 @@ impl AppState {
         self.ensure_navigator_selection_visible_from(terminal_runtimes);
     }
 
+    /// Open the command palette: assemble the catalog and enter the mode.
+    /// State-only entry (no terminal registry) — used by tests and by the
+    /// App-level `open_command_palette_from`.
+    pub(crate) fn open_command_palette(
+        &mut self,
+        toggles: crate::app::command_palette::SourceToggles,
+        plugin_entries: Vec<crate::app::command_palette::CommandEntry>,
+        custom_entries: Vec<crate::app::command_palette::CommandEntry>,
+    ) {
+        self.command_palette
+            .assemble(toggles, &self.keybinds, plugin_entries, custom_entries);
+        self.mode = Mode::CommandPalette;
+    }
+
     #[cfg(test)]
     pub(crate) fn navigator_rows(&self) -> Vec<NavigatorRow> {
         let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
@@ -3063,6 +3077,20 @@ mod tests {
     use crate::detect::{Agent, AgentState};
     use crate::workspace::Workspace;
     use ratatui::layout::Direction;
+
+    #[test]
+    fn open_command_palette_sets_mode_and_resets_state() {
+        let mut state = AppState::test_new();
+        state.open_command_palette(
+            crate::app::command_palette::SourceToggles::all(),
+            vec![],
+            vec![],
+        );
+        assert_eq!(state.mode, Mode::CommandPalette);
+        assert_eq!(state.command_palette.selected, 0);
+        assert!(state.command_palette.query.is_empty());
+        assert!(!state.command_palette.entries.is_empty()); // built-ins present
+    }
 
     fn app_with_workspaces(names: &[&str]) -> AppState {
         let mut state = AppState::test_new();

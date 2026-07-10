@@ -655,6 +655,14 @@ fn manifest_actions(
         })
 }
 
+/// Availability-filtered plugin actions collected for the command palette.
+/// Thin public wrapper over the module-private `manifest_actions` iterator.
+pub(crate) fn palette_plugin_actions(
+    plugins: &crate::app::state::InstalledPluginRegistry,
+) -> Vec<PluginActionInfo> {
+    manifest_actions(plugins).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

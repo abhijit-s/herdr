@@ -35,9 +35,9 @@ fn modified_url_click_modifier_matches_terminal_mouse_reporting() {
 }
 
 mod copy_mode;
-mod modal;
+pub(crate) mod modal;
 mod mouse;
-mod navigate;
+pub(crate) mod navigate;
 mod overlays;
 mod selection;
 mod settings;
@@ -105,6 +105,7 @@ impl App {
                 Mode::Navigator => {
                     handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event)
                 }
+                Mode::CommandPalette => modal::handle_command_palette_key(self, key_event),
                 Mode::Terminal => unreachable!(),
             },
         }
@@ -153,6 +154,16 @@ impl App {
                     return false;
                 }
                 insert_navigator_search_text(&mut self.state, &self.terminal_runtimes, text);
+                true
+            }
+            Mode::CommandPalette => {
+                let cp = &mut self.state.command_palette;
+                if cp.replace_on_type {
+                    cp.query.clear();
+                    cp.replace_on_type = false;
+                }
+                cp.query.push_str(text);
+                cp.refilter();
                 true
             }
             _ => false,
@@ -513,6 +524,7 @@ pub(crate) fn modal_paste_target_active(state: &AppState) -> bool {
             .as_ref()
             .is_some_and(|open| open.search_focused),
         Mode::Navigator => state.navigator.search_focused,
+        Mode::CommandPalette => true,
         _ => false,
     }
 }

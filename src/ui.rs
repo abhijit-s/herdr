@@ -6,6 +6,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+mod command_palette;
 mod dialogs;
 mod keybind_help;
 mod menus;
@@ -487,6 +488,11 @@ pub fn render_with_runtime_registry(
         Mode::GlobalMenu => render_global_launcher_menu(app, frame),
         Mode::KeybindHelp => render_keybind_help_overlay(app, frame),
         Mode::Navigator => render_navigator_overlay(app, terminal_runtimes, frame),
+        Mode::CommandPalette => {
+            let area = frame.area();
+            dim_background(frame, area);
+            command_palette::render_command_palette_overlay(app, frame);
+        }
         Mode::Terminal => {}
     }
 }
@@ -1464,6 +1470,7 @@ mod tests {
             crate::config::CustomCommandKeybind {
                 bindings: crate::config::ActionKeybinds::prefix("alt+g"),
                 label: "prefix+alt+g".to_string(),
+                keybind_display: None,
                 command: "lazygit".to_string(),
                 action: crate::config::CustomCommandAction::Pane,
                 description: Some("open lazygit".to_string()),
@@ -1471,6 +1478,7 @@ mod tests {
             crate::config::CustomCommandKeybind {
                 bindings: crate::config::ActionKeybinds::prefix("alt+h"),
                 label: "prefix+alt+h".to_string(),
+                keybind_display: None,
                 command: "echo hello".to_string(),
                 action: crate::config::CustomCommandAction::Shell,
                 description: None,

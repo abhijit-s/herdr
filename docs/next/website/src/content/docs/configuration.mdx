@@ -150,6 +150,7 @@ The default keymap is prefix-first and avoids direct shortcuts that can steal in
 detach = "prefix+q"
 workspace_picker = "prefix+w"
 goto = "prefix+g"
+command_palette = "prefix+:"
 new_workspace = "prefix+shift+n"
 new_worktree = "prefix+shift+g"
 rename_workspace = "prefix+shift+w"
@@ -207,6 +208,21 @@ Key strings accept plain keys, modifier combinations such as `ctrl+a`, `shift+n`
 
 If you have old custom keybindings and want the new defaults, run `herdr config reset-keys`. Herdr backs up `config.toml`, removes `[keys]` and `[[keys.command]]`, and uses built-in v2 defaults after restart or `herdr server reload-config`.
 
+## Command palette
+
+`command_palette` (default `prefix+:`) opens a floating command palette that fuzzy-filters a live catalog of commands and runs the one you pick through Herdr's normal execution path. Type to narrow the list, `↑`/`↓` (or `ctrl+p`/`ctrl+n`) to move, `↵` to run, and `esc` to cancel. Unbind it (`command_palette = ""`) to disable the feature entirely.
+
+The catalog merges three sources, each shown with a dim right-aligned tag: built-in navigation and pane commands (`built-in`), actions contributed by installed plugins (`plugin`), and your `[[keys.command]]` custom commands (`custom`). An arg-taking built-in such as `rename-workspace` or `workspace-picker` opens its existing overlay; a no-arg command such as `zoom` runs and closes the palette.
+
+Choose which sources feed the palette with `[command_palette].sources` (all enabled by default):
+
+```toml
+[command_palette]
+sources = { built_in = true, plugin = true, custom = true }
+```
+
+The native palette **supersedes the `jt.command-palette` plugin** — unlink it with `herdr plugin unlink jt.command-palette` to avoid a duplicate. The separate `local.smart-send` plugin is unrelated and continues to work.
+
 ## Indexed jumps
 
 Indexed keybindings use `1..9` in normal keybinding fields:
@@ -248,6 +264,8 @@ description = "apply layout"
 ```
 
 An optional `description` can be provided. When specified, this description is displayed in the keybind help panel (opened with `prefix+?`) in place of the default `'custom command'` label.
+
+An optional `label` can be provided. When set, the command palette shows the label as the entry name and moves the chord into the right-aligned keybind column. When omitted, the chord itself is the entry name and that column stays blank.
 
 Custom commands receive `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, `HERDR_ACTIVE_WORKSPACE_ID`, `HERDR_ACTIVE_TAB_ID`, `HERDR_ACTIVE_PANE_ID`, and `HERDR_ACTIVE_PANE_CWD` when those values are available. Shell commands run from the focused pane's working directory when Herdr can detect it.
 

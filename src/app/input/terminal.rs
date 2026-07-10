@@ -1019,6 +1019,7 @@ mod tests {
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
             bindings: crate::config::ActionKeybinds::direct("ctrl+alt+g"),
             label: "ctrl+alt+g".into(),
+            keybind_display: None,
             command,
             action: crate::config::CustomCommandAction::Shell,
             description: None,
@@ -1069,6 +1070,7 @@ mod tests {
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
             bindings: crate::config::ActionKeybinds::direct("ctrl+alt+g"),
             label: "ctrl+alt+g".into(),
+            keybind_display: None,
             command: "printf direct-pane".into(),
             action: crate::config::CustomCommandAction::Pane,
             description: None,

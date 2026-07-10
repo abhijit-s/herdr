@@ -9,6 +9,7 @@ mod agent_resume;
 mod agents;
 mod api;
 mod api_helpers;
+pub(crate) mod command_palette;
 mod config_io;
 mod creation;
 mod ids;
@@ -556,6 +557,12 @@ impl App {
             }),
             keybind_help: state::KeybindHelpState { scroll: 0 },
             navigator: state::NavigatorState::default(),
+            command_palette: command_palette::CommandPaletteState::default(),
+            command_palette_sources: command_palette::SourceToggles {
+                built_in: config.command_palette.sources.built_in,
+                plugin: config.command_palette.sources.plugin,
+                custom: config.command_palette.sources.custom,
+            },
             copy_mode: None,
             workspace_scroll: 0,
             agent_panel_scroll: 0,
@@ -1701,6 +1708,9 @@ impl App {
             }
             Mode::Navigator => {
                 input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event);
+            }
+            Mode::CommandPalette => {
+                crate::app::input::modal::handle_command_palette_key(self, key_event);
             }
             Mode::Terminal => {
                 // Should not be called in terminal mode.

@@ -93,6 +93,10 @@ pub struct CommandKeybindConfig {
     /// Command execution mode. Default: "shell".
     #[serde(rename = "type")]
     pub action_type: CommandKeybindType,
+    /// Optional human-readable label. When set, the command palette shows this
+    /// as the entry name and moves the chord into the right-aligned keybind
+    /// column. When unset, the chord itself is the name and that column is blank.
+    pub label: Option<String>,
     /// Optional user-defined description for this custom command.
     pub description: Option<String>,
 }
@@ -103,6 +107,7 @@ impl Default for CommandKeybindConfig {
             key: BindingConfig::empty(),
             command: String::new(),
             action_type: CommandKeybindType::Shell,
+            label: None,
             description: None,
         }
     }
@@ -280,6 +285,10 @@ impl IndexedKeybind {
 pub struct CustomCommandKeybind {
     pub bindings: ActionKeybinds,
     pub label: String,
+    /// Chord to surface in the palette's keybind column. Populated only when the
+    /// config set an explicit `label` (so the name is no longer the chord);
+    /// `None` leaves the column blank, matching the label-less default.
+    pub keybind_display: Option<String>,
     pub command: String,
     pub action: CustomCommandAction,
     pub description: Option<String>,
@@ -310,6 +319,7 @@ pub struct Keybinds {
     pub close_workspace: ActionKeybinds,
     pub workspace_picker: ActionKeybinds,
     pub goto: ActionKeybinds,
+    pub command_palette: ActionKeybinds,
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
@@ -472,6 +482,7 @@ impl Config {
             close_workspace: empty_action!(),
             workspace_picker: empty_action!(),
             goto: empty_action!(),
+            command_palette: empty_action!(),
             detach: empty_action!(),
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
@@ -594,6 +605,7 @@ impl Config {
             apply_action!(keybinds.close_workspace, close_workspace, source);
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
             apply_action!(keybinds.goto, goto, source);
+            apply_action!(keybinds.command_palette, command_palette, source);
             apply_action!(keybinds.detach, detach, source);
             apply_action!(keybinds.reload_config, reload_config, source);
             apply_action!(
@@ -745,10 +757,19 @@ fn append_custom_command_bindings(
             CommandKeybindType::Pane => CustomCommandAction::Pane,
             CommandKeybindType::PluginAction => CustomCommandAction::PluginAction,
         };
-        let label = bindings.label().unwrap_or_else(|| "unset".to_string());
+        let chord = bindings.label();
+        let label = command
+            .label
+            .clone()
+            .or_else(|| chord.clone())
+            .unwrap_or_else(|| "unset".to_string());
+        // An explicit config label frees the chord to be shown separately in the
+        // keybind column; without one the chord stays the name and the column is blank.
+        let keybind_display = command.label.as_ref().and(chord);
         keybinds.custom_commands.push(CustomCommandKeybind {
             bindings,
             label,
+            keybind_display,
             command: command.command.clone(),
             action,
             description: command.description.clone(),
@@ -2184,5 +2205,34 @@ description = "say hello"
             keybinds.custom_commands[0].description,
             Some("say hello".to_string())
         );
+    }
+
+    #[test]
+    fn custom_command_label_controls_name_and_keybind_display() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.command]]
+key = "prefix+ctrl+d"
+command = "deploy"
+label = "Deploy web"
+
+[[keys.command]]
+key = "prefix+ctrl+j"
+command = "swap-pane-down"
+"#,
+        )
+        .unwrap();
+        let keybinds = config.keybinds();
+        assert_eq!(keybinds.custom_commands.len(), 2);
+
+        // Labeled: name is the label, chord moves to the keybind column.
+        let labeled = &keybinds.custom_commands[0];
+        assert_eq!(labeled.label, "Deploy web");
+        assert_eq!(labeled.keybind_display.as_deref(), Some("prefix+ctrl+d"));
+
+        // Unlabeled: name stays the chord, keybind column blank (unchanged behavior).
+        let unlabeled = &keybinds.custom_commands[1];
+        assert_eq!(unlabeled.label, "prefix+ctrl+j");
+        assert!(unlabeled.keybind_display.is_none());
     }
 }

@@ -520,84 +520,126 @@ pub(crate) fn insert_rename_input_text(state: &mut AppState, text: &str) {
     state.name_input.push_str(text);
 }
 
-fn delete_rename_input_char(state: &mut AppState) {
-    if state.name_input_replace_on_type {
-        clear_rename_input(state);
-    } else {
-        state.name_input.pop();
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RenameWordDeleteClass {
+enum WordDeleteClass {
     Word,
     Separator,
 }
 
-fn rename_word_delete_class(ch: char) -> RenameWordDeleteClass {
+fn word_delete_class(ch: char) -> WordDeleteClass {
     if ch.is_alphanumeric() || ch == '_' {
-        RenameWordDeleteClass::Word
+        WordDeleteClass::Word
     } else {
-        RenameWordDeleteClass::Separator
+        WordDeleteClass::Separator
     }
 }
 
-fn delete_rename_input_word(state: &mut AppState) {
-    if state.name_input_replace_on_type {
-        clear_rename_input(state);
+/// Delete the trailing word from `buf`. When `replace_on_type` is set the whole
+/// buffer is cleared instead (pre-filled text is replaced wholesale).
+fn delete_buffer_word(buf: &mut String, replace_on_type: &mut bool) {
+    if *replace_on_type {
+        buf.clear();
+        *replace_on_type = false;
         return;
     }
 
-    while state
-        .name_input
-        .chars()
-        .last()
-        .is_some_and(char::is_whitespace)
-    {
-        state.name_input.pop();
+    while buf.chars().last().is_some_and(char::is_whitespace) {
+        buf.pop();
     }
 
-    let Some(class) = state
-        .name_input
-        .chars()
-        .last()
-        .map(rename_word_delete_class)
-    else {
+    let Some(class) = buf.chars().last().map(word_delete_class) else {
         return;
     };
 
-    while state
-        .name_input
+    while buf
         .chars()
         .last()
-        .is_some_and(|ch| !ch.is_whitespace() && rename_word_delete_class(ch) == class)
+        .is_some_and(|ch| !ch.is_whitespace() && word_delete_class(ch) == class)
     {
-        state.name_input.pop();
+        buf.pop();
     }
 }
 
-fn handle_rename_edit_key(state: &mut AppState, key: KeyEvent) {
+/// Buffer-generic single-key text edit shared by the rename overlays and the
+/// command-palette filter line. Returns true if the buffer changed. Threading
+/// `(&mut String, &mut bool)` keeps ONE implementation of the edit + word-delete
+/// semantics so a later Ctrl-W / Ctrl-U / replace-on-type fix cannot drift
+/// between the two callers.
+pub(crate) fn edit_text_buffer(
+    buf: &mut String,
+    replace_on_type: &mut bool,
+    key: KeyEvent,
+) -> bool {
     match key.code {
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            clear_rename_input(state);
+            buf.clear();
+            *replace_on_type = false;
+            true
         }
         KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => {
-            clear_rename_input(state);
+            buf.clear();
+            *replace_on_type = false;
+            true
         }
         KeyCode::Backspace
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 || key.modifiers.contains(KeyModifiers::ALT) =>
         {
-            delete_rename_input_word(state);
+            delete_buffer_word(buf, replace_on_type);
+            true
         }
         KeyCode::Char('h' | 'w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            delete_rename_input_word(state);
+            delete_buffer_word(buf, replace_on_type);
+            true
         }
-        KeyCode::Backspace => delete_rename_input_char(state),
+        KeyCode::Backspace => {
+            if *replace_on_type {
+                buf.clear();
+                *replace_on_type = false;
+            } else {
+                buf.pop();
+            }
+            true
+        }
         KeyCode::Char(c) if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-            insert_rename_input_text(state, &c.to_string());
+            if *replace_on_type {
+                buf.clear();
+                *replace_on_type = false;
+            }
+            buf.push(c);
+            true
         }
-        _ => {}
+        _ => false,
+    }
+}
+
+fn handle_rename_edit_key(state: &mut AppState, key: KeyEvent) {
+    edit_text_buffer(
+        &mut state.name_input,
+        &mut state.name_input_replace_on_type,
+        key,
+    );
+}
+
+pub(crate) fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.state.mode = Mode::Terminal,
+        KeyCode::Up => app.state.command_palette.move_selection(-1),
+        KeyCode::Down => app.state.command_palette.move_selection(1),
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.state.command_palette.move_selection(-1)
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.state.command_palette.move_selection(1)
+        }
+        KeyCode::Enter => app.dispatch_command_palette_entry(),
+        _ => {
+            let cp = &mut app.state.command_palette;
+            let changed = edit_text_buffer(&mut cp.query, &mut cp.replace_on_type, key);
+            if changed {
+                cp.refilter(); // resets selection to row 0
+            }
+        }
     }
 }
 
@@ -1285,6 +1327,28 @@ mod tests {
     use super::super::{capture_snapshot, state_with_workspaces};
     use super::*;
     use crate::workspace::Workspace;
+
+    fn key_char(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())
+    }
+
+    fn key_code(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    #[test]
+    fn command_palette_typing_filters_and_resets_selection() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        app.state.command_palette.selected = 3;
+        // type a char via the palette key handler
+        handle_command_palette_key(&mut app, key_char('n'));
+        assert_eq!(app.state.command_palette.query, "n");
+        assert_eq!(app.state.command_palette.selected, 0); // reset on edit
+        // esc closes
+        handle_command_palette_key(&mut app, key_code(KeyCode::Esc));
+        assert_ne!(app.state.mode, Mode::CommandPalette);
+    }
 
     fn config_env_lock() -> &'static std::sync::Mutex<()> {
         crate::config::test_config_env_lock()
