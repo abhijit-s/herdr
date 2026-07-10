@@ -29,6 +29,15 @@ pub(crate) fn truncate_ellipsis(s: &str, max: usize) -> String {
     format!("{keep}…")
 }
 
+/// 1-based `<selected+1>/<total>` position counter (e.g. `"12/63"`), so the user
+/// can see the filtered list continues off-screen. `None` when the list is empty.
+pub(crate) fn position_indicator(selected: usize, total: usize) -> Option<String> {
+    if total == 0 {
+        return None;
+    }
+    Some(format!("{}/{}", selected + 1, total))
+}
+
 /// Which column a rendered row segment belongs to (drives its style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RowSpanKind {
@@ -127,9 +136,26 @@ pub(crate) fn render_command_palette_overlay(app: &AppState, frame: &mut Frame) 
     let areas = modal_stack_areas(inner, 1, 0, 0, 1);
     let cp = &app.command_palette;
 
-    // Filter line with the block cursor (mirrors the rename dialog input).
-    let filter = Paragraph::new(format!(" {}█", cp.query))
-        .style(Style::default().fg(p.text).bg(p.surface0));
+    // Filter line with the block cursor (mirrors the rename dialog input) plus a
+    // right-aligned position counter. The query always wins: when the header is
+    // too narrow to hold both with a 1-col gap, the counter is dropped.
+    let header_style = Style::default().fg(p.text).bg(p.surface0);
+    let query_text = format!(" {}█", cp.query);
+    let query_w = query_text.chars().count();
+    let mut spans: Vec<Span> = vec![Span::styled(query_text, header_style)];
+    if let Some(indicator) = position_indicator(cp.selected, cp.visible().len()) {
+        let header_w = areas.header.width as usize;
+        let ind_w = indicator.chars().count();
+        if header_w > query_w + ind_w {
+            let pad = header_w - query_w - ind_w;
+            spans.push(Span::styled(" ".repeat(pad), header_style));
+            spans.push(Span::styled(
+                indicator,
+                header_style.fg(p.overlay0).add_modifier(Modifier::DIM),
+            ));
+        }
+    }
+    let filter = Paragraph::new(Line::from(spans)).style(header_style);
     frame.render_widget(Clear, areas.header);
     frame.render_widget(filter, areas.header);
 
@@ -258,6 +284,13 @@ mod tests {
                 row_width(&seg)
             );
         }
+    }
+
+    #[test]
+    fn position_indicator_is_one_based_and_none_when_empty() {
+        assert_eq!(position_indicator(0, 63).as_deref(), Some("1/63"));
+        assert_eq!(position_indicator(11, 63).as_deref(), Some("12/63"));
+        assert_eq!(position_indicator(0, 0), None);
     }
 
     #[test]

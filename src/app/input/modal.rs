@@ -621,16 +621,48 @@ fn handle_rename_edit_key(state: &mut AppState, key: KeyEvent) {
     );
 }
 
+/// List-viewport height of the palette popup, derived from the terminal size.
+/// The render path takes `&AppState` and cannot cache the popup height back to
+/// state, so we recompute it here from `last_terminal_size`: the popup is ~60%
+/// of the screen, minus a 1-row header and the 2 modal border rows. `jump_clamped`
+/// clamps at the ends, so exact precision does not matter; floored at 1 so a tiny
+/// terminal still scrolls.
+fn command_palette_list_height(app: &App) -> usize {
+    let rows = app
+        .last_terminal_size
+        .map(|(_, h)| h as usize)
+        .unwrap_or(24);
+    (rows * 6 / 10).saturating_sub(3).max(1)
+}
+
 pub(crate) fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => app.state.mode = Mode::Terminal,
         KeyCode::Up => app.state.command_palette.move_selection(-1),
         KeyCode::Down => app.state.command_palette.move_selection(1),
+        KeyCode::Home => app.state.command_palette.select_first(),
+        KeyCode::End => app.state.command_palette.select_last(),
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.state.command_palette.move_selection(-1)
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.state.command_palette.move_selection(1)
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let half = (command_palette_list_height(app) / 2).max(1) as i32;
+            app.state.command_palette.jump_clamped(half);
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let half = (command_palette_list_height(app) / 2).max(1) as i32;
+            app.state.command_palette.jump_clamped(-half);
+        }
+        KeyCode::PageDown => {
+            let page = command_palette_list_height(app) as i32;
+            app.state.command_palette.jump_clamped(page);
+        }
+        KeyCode::PageUp => {
+            let page = command_palette_list_height(app) as i32;
+            app.state.command_palette.jump_clamped(-page);
         }
         KeyCode::Enter => app.dispatch_command_palette_entry(),
         _ => {
@@ -1348,6 +1380,53 @@ mod tests {
         // esc closes
         handle_command_palette_key(&mut app, key_code(KeyCode::Esc));
         assert_ne!(app.state.mode, Mode::CommandPalette);
+    }
+
+    #[test]
+    fn command_palette_ctrl_d_moves_without_typing() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        app.state.command_palette.selected = 0;
+        let before = app.state.command_palette.query.clone();
+        handle_command_palette_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        // Ctrl+d does NOT fall through to the text buffer
+        assert_eq!(app.state.command_palette.query, before);
+        // and it advances the selection down the list
+        assert!(app.state.command_palette.selected > 0);
+    }
+
+    #[test]
+    fn command_palette_home_end_land_on_ends() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        handle_command_palette_key(&mut app, key_code(KeyCode::End));
+        let last = app.state.command_palette.visible().len().saturating_sub(1);
+        assert!(last > 0);
+        assert_eq!(app.state.command_palette.selected, last);
+        handle_command_palette_key(&mut app, key_code(KeyCode::Home));
+        assert_eq!(app.state.command_palette.selected, 0);
+    }
+
+    #[test]
+    fn command_palette_page_keys_clamp_without_wrap() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        app.open_command_palette_from();
+        let last = app.state.command_palette.visible().len().saturating_sub(1);
+        assert!(last > 0);
+        // PageUp from the top clamps at 0 (no wrap to the end)
+        app.state.command_palette.selected = 0;
+        handle_command_palette_key(&mut app, key_code(KeyCode::PageUp));
+        assert_eq!(app.state.command_palette.selected, 0);
+        // PageDown from the top advances down the list, then clamps at the end
+        handle_command_palette_key(&mut app, key_code(KeyCode::PageDown));
+        assert!(app.state.command_palette.selected > 0);
+        for _ in 0..last + 2 {
+            handle_command_palette_key(&mut app, key_code(KeyCode::PageDown));
+        }
+        assert_eq!(app.state.command_palette.selected, last);
     }
 
     fn config_env_lock() -> &'static std::sync::Mutex<()> {
