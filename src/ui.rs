@@ -1470,6 +1470,7 @@ mod tests {
             crate::config::CustomCommandKeybind {
                 bindings: crate::config::ActionKeybinds::prefix("alt+g"),
                 label: "prefix+alt+g".to_string(),
+                keybind_display: None,
                 command: "lazygit".to_string(),
                 action: crate::config::CustomCommandAction::Pane,
                 description: Some("open lazygit".to_string()),
@@ -1477,6 +1478,7 @@ mod tests {
             crate::config::CustomCommandKeybind {
                 bindings: crate::config::ActionKeybinds::prefix("alt+h"),
                 label: "prefix+alt+h".to_string(),
+                keybind_display: None,
                 command: "echo hello".to_string(),
                 action: crate::config::CustomCommandAction::Shell,
                 description: None,

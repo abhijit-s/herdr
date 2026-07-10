@@ -3061,6 +3061,7 @@ navigate_pane_down = "ctrl+j"
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
             bindings: crate::config::ActionKeybinds::prefix("m"),
             label: "prefix+m".into(),
+            keybind_display: None,
             command,
             action: crate::config::CustomCommandAction::Shell,
             description: None,
@@ -3123,6 +3124,7 @@ navigate_pane_down = "ctrl+j"
         app.state.keybinds.custom_commands = vec![crate::config::CustomCommandKeybind {
             bindings: crate::config::ActionKeybinds::prefix("m"),
             label: "prefix+m".into(),
+            keybind_display: None,
             command,
             action: crate::config::CustomCommandAction::Pane,
             description: None,

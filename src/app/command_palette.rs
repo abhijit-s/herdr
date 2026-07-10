@@ -378,9 +378,10 @@ pub(crate) fn custom_entries_from_config(customs: &[CustomCommandKeybind]) -> Ve
         .map(|kb| CommandEntry {
             name: kb.label.clone(),
             description: kb.description.clone(),
-            // Custom entries surface their chord as the `name`; leave the keybind
-            // column blank so it is not duplicated.
-            keybinding: None,
+            // A labeled custom shows its chord in the keybind column; a label-less
+            // one keeps the chord as the `name` and leaves the column blank
+            // (`keybind_display` is `None`) so it is not duplicated.
+            keybinding: kb.keybind_display.clone(),
             source: CommandSource::Custom,
             handle: CommandHandle::Custom(Box::new(kb.clone())),
         })
@@ -435,18 +436,32 @@ mod tests {
         assert_eq!(zoom.keybinding.as_deref(), Some("prefix+z"));
         // an unbound-by-default built-in yields no keybind column
         assert!(builtin_keybind_label(&kb, &NavigateAction::OpenWorktree).is_none());
-        // a custom command surfaces its chord as the name, never in the keybind column
-        let customs = vec![CustomCommandKeybind {
-            bindings: crate::config::ActionKeybinds::default(),
-            label: "prefix+ctrl+j".to_string(),
-            command: "swap-pane-down".to_string(),
-            action: crate::config::CustomCommandAction::Pane,
-            description: Some("swap pane down".to_string()),
-        }];
+        // a label-less custom surfaces its chord as the name, blank keybind column;
+        // a labeled custom shows the label as the name and its chord on the right.
+        let customs = vec![
+            CustomCommandKeybind {
+                bindings: crate::config::ActionKeybinds::default(),
+                label: "prefix+ctrl+j".to_string(),
+                keybind_display: None,
+                command: "swap-pane-down".to_string(),
+                action: crate::config::CustomCommandAction::Pane,
+                description: Some("swap pane down".to_string()),
+            },
+            CustomCommandKeybind {
+                bindings: crate::config::ActionKeybinds::default(),
+                label: "Deploy web".to_string(),
+                keybind_display: Some("prefix+ctrl+d".to_string()),
+                command: "deploy".to_string(),
+                action: crate::config::CustomCommandAction::Shell,
+                description: Some("ship it".to_string()),
+            },
+        ];
         let custom = custom_entries_from_config(&customs);
-        assert_eq!(custom.len(), 1);
+        assert_eq!(custom.len(), 2);
         assert_eq!(custom[0].name, "prefix+ctrl+j");
         assert!(custom[0].keybinding.is_none());
+        assert_eq!(custom[1].name, "Deploy web");
+        assert_eq!(custom[1].keybinding.as_deref(), Some("prefix+ctrl+d"));
     }
 
     fn plugin_entries_from(v: Vec<(String, String, Option<String>)>) -> Vec<CommandEntry> {
