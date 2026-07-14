@@ -617,6 +617,9 @@ mod tests {
             vec![],
         );
         // distinct qualified_ids → distinct identity keys → both survive
-        assert_eq!(state.entries.iter().filter(|e| e.name == "build").count(), 2);
+        assert_eq!(
+            state.entries.iter().filter(|e| e.name == "build").count(),
+            2
+        );
     }
 }

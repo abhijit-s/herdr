@@ -238,7 +238,13 @@ mod tests {
     #[test]
     fn command_palette_row_fits_all_four_fields_when_wide() {
         let width = 60;
-        let seg = command_palette_row("zoom", Some("Toggle pane zoom"), Some("prefix+z"), "built-in", width);
+        let seg = command_palette_row(
+            "zoom",
+            Some("Toggle pane zoom"),
+            Some("prefix+z"),
+            "built-in",
+            width,
+        );
         // occupies exactly the available width
         assert_eq!(row_width(&seg), width);
         // every column is present and un-truncated at a comfortable width

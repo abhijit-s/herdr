@@ -540,6 +540,12 @@
           "type": "string",
           "default": "unset",
           "description": "Modifier combo for agent shortcuts 1-9. Unset by default."
+        },
+        {
+          "key": "keys.command_palette",
+          "type": "keybinding",
+          "default": "\"prefix+:\"",
+          "description": "Open the command palette, a floating fuzzy-filtered catalog of commands. Unbind (\"\") to disable."
         }
       ]
     },
@@ -691,6 +697,48 @@
           "type": "color",
           "default": "\"cyan\"",
           "description": "Accent color for highlights, borders, and navigation UI. Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250))."
+        },
+        {
+          "key": "ui.status.status_right",
+          "type": "string",
+          "default": "unset",
+          "description": "Right-aligned tmux-style status strip format. Supports literal text, a %-strftime subset (%H %M %S %d %b %Y %%), #(command) segments, #{slot:NAME} pushed values, and #[...] style directives. Empty hides the strip."
+        },
+        {
+          "key": "ui.status.status_right_length",
+          "type": "integer",
+          "default": "28",
+          "description": "Column budget reserved for the status strip on the right of the tab bar. Zero disables the reserved zone."
+        },
+        {
+          "key": "ui.status.status_interval",
+          "type": "integer",
+          "default": "5",
+          "description": "Refresh cadence in seconds for #(command) status segments. Floored at 1."
+        }
+      ]
+    },
+    {
+      "id": "command_palette",
+      "title": "Command palette",
+      "keys": [
+        {
+          "key": "command_palette.sources.built_in",
+          "type": "boolean",
+          "default": "true",
+          "description": "Include built-in navigation commands in the command palette."
+        },
+        {
+          "key": "command_palette.sources.plugin",
+          "type": "boolean",
+          "default": "true",
+          "description": "Include plugin-provided commands in the command palette."
+        },
+        {
+          "key": "command_palette.sources.custom",
+          "type": "boolean",
+          "default": "true",
+          "description": "Include user-defined custom commands in the command palette."
         }
       ]
     },

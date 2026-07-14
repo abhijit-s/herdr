@@ -965,9 +965,15 @@ mod tests {
         assert!(emitted, "non-empty data must emit an upload");
 
         let text = String::from_utf8_lossy(&out);
-        assert!(text.contains("a=t,t=d,f=100,i=12345"), "must upload as PNG (f=100)");
+        assert!(
+            text.contains("a=t,t=d,f=100,i=12345"),
+            "must upload as PNG (f=100)"
+        );
         assert!(!text.contains("f=32"), "must not upload raw RGBA");
-        assert!(!text.contains(",s=512"), "PNG upload omits raw s= dimension");
+        assert!(
+            !text.contains(",s=512"),
+            "PNG upload omits raw s= dimension"
+        );
 
         // Base64 payload of the re-encoded PNG must be dramatically smaller than
         // base64 of the raw pixels (512*512*4 bytes -> ~1.4 MB base64).

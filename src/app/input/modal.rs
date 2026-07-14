@@ -1377,7 +1377,7 @@ mod tests {
         handle_command_palette_key(&mut app, key_char('n'));
         assert_eq!(app.state.command_palette.query, "n");
         assert_eq!(app.state.command_palette.selected, 0); // reset on edit
-        // esc closes
+                                                           // esc closes
         handle_command_palette_key(&mut app, key_code(KeyCode::Esc));
         assert_ne!(app.state.mode, Mode::CommandPalette);
     }
