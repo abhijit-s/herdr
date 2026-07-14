@@ -730,7 +730,7 @@ fn pane_info_reports_foreground_cwd_without_changing_pane_cwd() {
         .unwrap()
         .to_string();
     let command = format!(
-        "/bin/sh -c 'cd {} && printf %s $$ > {} && touch {} && sleep 30'",
+        "/bin/sh -c 'cd {} && printf %s $$ > {} && touch {} && sleep 30; :'",
         foreground.display(),
         pid_file.display(),
         marker.display()
@@ -789,6 +789,33 @@ fn pane_info_reports_foreground_cwd_without_changing_pane_cwd() {
         panes["result"]["panes"][0]["foreground_cwd"],
         foreground.display().to_string()
     );
+
+    let process_info = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"fg_process_info","method":"pane.process_info","params":{{"pane_id":"{}"}}}}"#,
+            pane_id
+        ),
+    );
+    let process_info = &process_info["result"]["process_info"];
+    assert!(process_info["shell_pid"].is_number());
+    assert_eq!(process_info["foreground_process_group_id"], foreground_pid);
+    assert!(process_info.get("tty").is_none());
+    let foreground_processes = process_info["foreground_processes"].as_array().unwrap();
+    let foreground_shell = foreground_processes
+        .iter()
+        .find(|process| process["pid"] == foreground_pid)
+        .expect("foreground shell should be reported");
+    assert_eq!(foreground_shell["name"], "sh");
+    assert_eq!(foreground_shell["cwd"], foreground.display().to_string());
+    assert!(foreground_shell.get("argv0").is_none());
+    assert!(foreground_shell["argv"].is_array());
+    assert!(foreground_shell["cmdline"].is_string());
+    let foreground_sleep = foreground_processes
+        .iter()
+        .find(|process| process["name"] == "sleep" && process["pid"] != foreground_pid)
+        .expect("foreground sleep child should be reported separately");
+    assert_eq!(foreground_sleep["cwd"], foreground.display().to_string());
 
     let reported = send_request(
         &socket_path,

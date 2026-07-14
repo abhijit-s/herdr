@@ -675,6 +675,12 @@
           ]
         },
         {
+          "key": "ui.sidebar.agents.row_gap",
+          "type": "integer",
+          "default": "0",
+          "description": "Blank terminal rows between expanded Agent sidebar entries. Set to 1 to restore the previous spacing."
+        },
+        {
           "key": "ui.sidebar.agents.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"workspace\", \"tab\"], [\"agent\"]]",
@@ -685,6 +691,12 @@
           "type": "table of token rows",
           "default": "{}",
           "description": "Complete Agent-row overrides keyed by strict canonical agent id. Agents without an override use ui.sidebar.agents.rows."
+        },
+        {
+          "key": "ui.sidebar.spaces.row_gap",
+          "type": "integer",
+          "default": "0",
+          "description": "Blank terminal rows between expanded Space sidebar entries. Set to 1 to restore the previous spacing. Consecutive indented worktree children remain packed as one group."
         },
         {
           "key": "ui.sidebar.spaces.rows",

@@ -71,6 +71,26 @@ use crate::server::client_transport::ClientWriter;
 #[cfg(test)]
 use std::fs;
 
+const LIVE_HANDOFF_RESPONSE_WRITE_TIMEOUT: Duration = Duration::from_secs(6);
+
+fn wait_for_live_handoff_response_write(
+    response_write_complete: Option<std::sync::mpsc::Receiver<()>>,
+) {
+    let Some(response_write_complete) = response_write_complete else {
+        return;
+    };
+
+    match response_write_complete.recv_timeout(LIVE_HANDOFF_RESPONSE_WRITE_TIMEOUT) {
+        Ok(()) => {}
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            warn!("timed out waiting for live handoff response write; old server exiting");
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            warn!("live handoff response writer disconnected; old server exiting");
+        }
+    }
+}
+
 fn sound_notify_message(sound: crate::sound::Sound) -> &'static str {
     match sound {
         crate::sound::Sound::Done => "agent done",
@@ -771,6 +791,7 @@ impl HeadlessServer {
                     method,
                 },
                 respond_to,
+                response_write_complete: None,
             },
             true,
         );
@@ -1101,11 +1122,14 @@ impl HeadlessServer {
         }
         crate::server::handoff::wait_owned_ack(&mut stream);
 
+        Ok(())
+    }
+
+    fn finish_live_handoff_shutdown(&mut self) {
         self.shutting_down = true;
         self.app.state.should_quit = true;
         self.app.no_session = true;
         info!("live handoff completed; old server exiting");
-        Ok(())
     }
 
     #[cfg(not(unix))]
@@ -2812,7 +2836,9 @@ impl HeadlessServer {
         let metadata_expired = self.app.expire_due_metadata(Instant::now());
 
         if let api::schema::Method::ServerLiveHandoff(params) = &msg.request.method {
-            let response = match self.perform_live_handoff(params.clone()) {
+            let handoff_result = self.perform_live_handoff(params.clone());
+            let handoff_succeeded = handoff_result.is_ok();
+            let response = match handoff_result {
                 Ok(()) => serde_json::to_string(&api::schema::SuccessResponse {
                     id: msg.request.id,
                     result: api::schema::ResponseResult::Ok {},
@@ -2827,6 +2853,10 @@ impl HeadlessServer {
             }
             .unwrap_or_else(|_| "{}".to_string());
             let _ = msg.respond_to.send(response);
+            if handoff_succeeded {
+                wait_for_live_handoff_response_write(msg.response_write_complete);
+                self.finish_live_handoff_shutdown();
+            }
             return true;
         }
 
@@ -4378,6 +4408,7 @@ mod tests {
                 method: api::schema::Method::PaneList(api::schema::PaneListParams::default()),
             },
             respond_to,
+            response_write_complete: None,
         });
         let response: api::schema::SuccessResponse =
             serde_json::from_str(&response_rx.recv().unwrap()).unwrap();
@@ -4417,6 +4448,7 @@ mod tests {
                     method: api::schema::Method::ServerStop(api::schema::EmptyParams::default()),
                 },
                 respond_to,
+                response_write_complete: None,
             })
         );
         let response = response_rx
@@ -8399,6 +8431,7 @@ next_tab = ""
                 ),
             },
             respond_to,
+            response_write_complete: None,
         });
 
         assert!(changed);
@@ -8484,6 +8517,7 @@ next_tab = ""
                 ),
             },
             respond_to,
+            response_write_complete: None,
         });
 
         assert!(changed);
@@ -8535,6 +8569,7 @@ next_tab = ""
                 ),
             },
             respond_to,
+            response_write_complete: None,
         });
 
         assert!(changed);
@@ -8566,6 +8601,7 @@ next_tab = ""
                 ),
             },
             respond_to,
+            response_write_complete: None,
         });
 
         assert!(changed);
@@ -8602,6 +8638,7 @@ next_tab = ""
                     ),
                 },
                 respond_to,
+                response_write_complete: None,
             })
         );
 
@@ -8657,6 +8694,7 @@ next_tab = ""
                     ),
                 },
                 respond_to,
+                response_write_complete: None,
             })
         );
 
@@ -8928,6 +8966,7 @@ next_tab = ""
                 }),
             },
             respond_to,
+            response_write_complete: None,
         });
 
         assert!(changed);

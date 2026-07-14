@@ -448,21 +448,20 @@ impl AppState {
         }
 
         let mut row_y = body.y;
-        for detail in crate::ui::agent_panel_entries(self)
-            .into_iter()
-            .skip(self.agent_panel_scroll)
-        {
-            let height = crate::ui::agent_entry_height_in_body(self, &detail, body.height);
-            if row_y.saturating_add(height) > body.y + body.height {
+        let body_bottom = body.y + body.height;
+        let entries = crate::ui::agent_panel_entries(self);
+        for (index, detail) in entries.iter().enumerate().skip(self.agent_panel_scroll) {
+            let height = crate::ui::agent_entry_height_in_body(self, detail, body.height);
+            if row_y.saturating_add(height) > body_bottom {
                 break;
             }
             if row >= row_y && row < row_y.saturating_add(height) {
                 return Some((detail.ws_idx, detail.tab_idx, detail.pane_id));
             }
-            row_y = row_y.saturating_add(height);
-            if row_y < body.y + body.height {
-                row_y = row_y.saturating_add(1);
-            }
+            row_y = row_y
+                .saturating_add(height)
+                .saturating_add(crate::ui::agent_entry_gap(self, index, entries.len()))
+                .min(body_bottom);
         }
         None
     }
@@ -721,6 +720,7 @@ mod tests {
                 vec![crate::config::AgentSidebarToken::Workspace],
             ],
         );
+        app.state.sidebar_agents.row_gap = 1;
         let detail_area = app.state.agent_panel_rect();
         let metrics = crate::ui::agent_panel_scroll_metrics(&app.state, detail_area);
         let body = crate::ui::agent_panel_body_rect(
@@ -735,6 +735,12 @@ mod tests {
         assert_eq!(app.state.agent_detail_target_at(body.y + 1), None);
         assert_eq!(
             app.state.agent_detail_target_at(body.y + 3),
+            Some((1, 0, second_pane))
+        );
+
+        app.state.sidebar_agents.row_gap = 0;
+        assert_eq!(
+            app.state.agent_detail_target_at(body.y + 1),
             Some((1, 0, second_pane))
         );
     }
@@ -1219,11 +1225,19 @@ mod tests {
             Workspace::test_new("b"),
             Workspace::test_new("c"),
         ];
+        app.state.sidebar_spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
+        app.state.sidebar_spaces.row_gap = 0;
         let active_id = app.state.workspaces[1].id.clone();
         let selected_id = app.state.workspaces[2].id.clone();
         app.state.active = Some(1);
         app.state.selected = 2;
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let packed_boundary_row = app.state.view.workspace_card_areas[1].rect.y;
+        assert_eq!(
+            app.state.workspace_drop_index_at_row(packed_boundary_row),
+            Some(2)
+        );
+
         let source_row = app.state.view.workspace_card_areas[1].rect.y;
         let target_row = crate::ui::workspace_drop_indicator_row(
             &app.state.view.workspace_card_areas,
@@ -1454,6 +1468,7 @@ mod tests {
             .get_mut(&second_terminal_id)
             .unwrap()
             .cwd = second_repo.clone();
+        app.state.sidebar_spaces.row_gap = 1;
         crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
 
         assert_eq!(app.state.workspace_drop_index_at_row(0), Some(0));
@@ -1473,7 +1488,7 @@ mod tests {
             Workspace::test_new("b"),
             Workspace::test_new("c"),
         ];
-        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 24));
 
         let cards = &app.state.view.workspace_card_areas;
         let bottom_slot = crate::ui::workspace_drop_indicator_row(

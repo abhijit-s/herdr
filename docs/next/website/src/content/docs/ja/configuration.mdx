@@ -235,12 +235,14 @@ yellow = "#f9e2af"
 
 ```toml
 [ui.sidebar.agents]
+row_gap = 0
 rows = [
   ["state_icon", "workspace", "tab"],
   ["agent"],
 ]
 
 [ui.sidebar.spaces]
+row_gap = 0
 rows = [
   ["state_icon", "workspace"],
   ["branch", "git_status"],
@@ -269,6 +271,8 @@ Space の行では、次の組み込みトークンを使えます:
 - `$name` — `name` という名前のカスタムワークスペースメタデータ。
 
 トークンは設定された順序で描画されます。Herdr は通常、隣接する値を ` · ` で区切り、`state_icon` の後には空白を 1 つ入れます。値がない場合、その値と区切りは表示されません。すべてのトークンに値がない行は表示されません。各レイアウトは最大 16 行、各行は最大 16 トークンです。
+
+`row_gap` は、Agent パネルと Space パネルごとに、エントリ間の空白行数を指定します。デフォルトは `0` で、エントリを詰めて表示します。以前の間隔に戻すには `1` に設定します。`rows` で定義したコンテンツ行の間隔には影響しません。連続するインデントされた worktree の子は、1 つの Space グループとして詰めて表示されます。
 
 既知のエージェントについて Agent の完全なレイアウトを上書きするには、`rows_by_agent` を使います:
 

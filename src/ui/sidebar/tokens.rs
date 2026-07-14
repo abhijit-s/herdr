@@ -153,7 +153,7 @@ mod tests {
                 vec![AgentSidebarToken::Custom("missing".into())],
                 vec![AgentSidebarToken::Agent],
             ],
-            rows_by_agent: Default::default(),
+            ..Default::default()
         };
 
         let rows = agent_rows(&config, &entry, "working");
@@ -174,7 +174,7 @@ mod tests {
                 AgentSidebarToken::StateText,
                 AgentSidebarToken::Custom("summary".into()),
             ]],
-            rows_by_agent: Default::default(),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -200,7 +200,7 @@ mod tests {
                 AgentSidebarToken::TerminalTitleStripped,
                 AgentSidebarToken::Custom("terminal_title".into()),
             ]],
-            rows_by_agent: Default::default(),
+            ..Default::default()
         };
 
         assert_eq!(
@@ -217,7 +217,7 @@ mod tests {
     fn known_agent_override_replaces_default_rows() {
         let mut config = AgentsSidebarConfig {
             rows: vec![vec![AgentSidebarToken::Workspace]],
-            rows_by_agent: Default::default(),
+            ..Default::default()
         };
         config
             .rows_by_agent
@@ -265,6 +265,7 @@ mod tests {
         let tokens = std::collections::HashMap::from([("jj_status".into(), "2 changes".into())]);
         let config = SpacesSidebarConfig {
             rows: vec![vec![SpaceSidebarToken::Custom("jj_status".into())]],
+            ..Default::default()
         };
 
         assert_eq!(

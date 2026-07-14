@@ -323,6 +323,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.
 # [ui.sidebar.agents]
+# Blank rows between agent entries. Set to 1 to restore the previous spacing.
+# row_gap = 0
 # rows = [["state_icon", "workspace", "tab"], ["agent"]]
 # Optional canonical agent IDs replace the default rows for matching agents.
 # [ui.sidebar.agents.rows_by_agent]
@@ -331,6 +333,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Expanded space rows. Built-ins are state_icon, state_text, workspace, branch, and git_status.
 # Custom values reported through workspace metadata use a $name token, for example $jj_status.
 # [ui.sidebar.spaces]
+# Blank rows between space entries. Set to 1 to restore the previous spacing.
+# row_gap = 0
 # rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
 # Accent color for highlights, borders, and navigation UI.
