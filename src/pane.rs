@@ -40,7 +40,10 @@ use self::agent_detection::{
     AGENT_PENDING_IDLE_RECHECK, AGENT_STARTUP_GRACE_WINDOW,
 };
 use self::terminal::{GhosttyPaneTerminal, PaneTerminal};
-pub(crate) use self::terminal::{TerminalDirtyPatch, TerminalDirtyPatchOutcome};
+pub(crate) use self::terminal::{
+    TerminalDirtyPatch, TerminalDirtyPatchOutcome, TerminalTextMatch, TerminalTextPoint,
+    TerminalWordMotion,
+};
 pub use self::{
     state::PaneState,
     terminal::{InputState, ScrollMetrics, TerminalCursorState},
@@ -1478,6 +1481,7 @@ impl PaneRuntime {
             },
             keyboard_protocol_ansi: self.terminal.kitty_keyboard_state_ansi(),
             input_state: self.input_state(),
+            terminal_title: self.terminal_title(),
             initial_history_ansi: None,
         }
     }
@@ -1665,6 +1669,7 @@ impl PaneRuntime {
             keyboard_protocol_flags,
             keyboard_protocol_ansi,
             input_state,
+            terminal_title,
             initial_history_ansi,
         } = state;
         let pane_id = PaneId::from_raw(pane_id);
@@ -1685,6 +1690,7 @@ impl PaneRuntime {
         }
         let pane_terminal = GhosttyPaneTerminal::new(terminal, response_tx.clone())?;
         pane_terminal.apply_host_terminal_theme(host_terminal_theme);
+        pane_terminal.seed_terminal_title(terminal_title);
         if let Some(input_state) = input_state {
             pane_terminal.seed_handoff_input_state(input_state);
         }
@@ -2383,6 +2389,34 @@ impl PaneRuntime {
         self.terminal.scroll_metrics()
     }
 
+    pub(crate) fn search_text_matches(
+        &self,
+        query: &str,
+        case_sensitive: bool,
+    ) -> Vec<crate::pane::TerminalTextMatch> {
+        self.terminal.search_text_matches(query, case_sensitive)
+    }
+
+    pub(crate) fn text_match_is_current(&self, text_match: crate::pane::TerminalTextMatch) -> bool {
+        self.terminal.text_match_is_current(text_match)
+    }
+
+    pub(crate) fn text_matches_are_current(
+        &self,
+        text_matches: &[crate::pane::TerminalTextMatch],
+    ) -> Vec<bool> {
+        self.terminal.text_matches_are_current(text_matches)
+    }
+
+    pub(crate) fn word_motion_target(
+        &self,
+        row: u32,
+        col: u16,
+        motion: crate::pane::TerminalWordMotion,
+    ) -> Option<crate::pane::TerminalTextPoint> {
+        self.terminal.word_motion_target(row, col, motion)
+    }
+
     pub fn input_state(&self) -> Option<InputState> {
         self.terminal.input_state()
     }
@@ -2417,6 +2451,10 @@ impl PaneRuntime {
 
     pub fn detection_text(&self) -> String {
         self.terminal.detection_text()
+    }
+
+    pub fn terminal_title(&self) -> Option<String> {
+        self.terminal.terminal_title()
     }
 
     pub fn agent_osc_title(&self) -> String {
@@ -3090,16 +3128,20 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn handoff_runtime_state_captures_terminal_input_state() {
+    async fn handoff_runtime_state_captures_terminal_input_and_title_state() {
         let runtime = PaneRuntime::test_with_screen_bytes(
             80,
             24,
             b"\x1b[>5u\x1b[>4;2m\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1002h\x1b[?1006h",
         );
 
+        runtime.test_process_pty_bytes("\x1b]2;✳ 修复🙂标题\x1b\\".as_bytes());
+        runtime.terminal.clear_agent_osc_state();
+        assert_eq!(runtime.agent_osc_title(), "");
         let pane = runtime.handoff_runtime_state(12);
 
         assert_eq!(pane.keyboard_protocol_flags, 5);
+        assert_eq!(pane.terminal_title.as_deref(), Some("✳ 修复🙂标题"));
         assert_eq!(
             pane.input_state,
             Some(InputState {

@@ -73,6 +73,7 @@ mod ipc;
 mod kitty_graphics;
 mod layout;
 mod logging;
+mod metadata_tokens;
 mod pane;
 mod persist;
 mod platform;
@@ -145,7 +146,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 [update]
 # Update channel used by background version checks and `herdr update`.
-# Use "stable" for normal releases or "preview" for opt-in preview builds.
+# Defaults to "stable" on Linux/macOS and "preview" on Windows.
+# Set explicitly to choose stable releases or opt-in preview builds.
 # channel = "stable"
 
 # Check herdr.dev for new Herdr versions in the background.
@@ -272,6 +274,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Pane apps like lazygit and btop can still receive mouse when they request it.
 # mouse_capture = true
 
+# Copy text selected by mouse drag or double-click.
+# Set false to disable mouse text selection and copying.
+# copy_on_select = true
+
 # Host cursor policy: "auto", "native", or "drawn".
 # "auto" draws Herdr's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
 # "native" always uses the outer terminal cursor. "drawn" always draws Herdr's cursor as terminal cell content.
@@ -312,6 +318,20 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Agent panel ordering: "spaces" (grouped by space) or "priority" (attention queue).
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
+
+# Expanded agent rows. Built-ins are state_icon, state_text, workspace, tab, pane, agent,
+# terminal_title, and terminal_title_stripped.
+# Custom values reported through pane metadata use a $name token.
+# [ui.sidebar.agents]
+# rows = [["state_icon", "workspace", "tab"], ["agent"]]
+# Optional canonical agent IDs replace the default rows for matching agents.
+# [ui.sidebar.agents.rows_by_agent]
+# claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"], ["agent"]]
+
+# Expanded space rows. Built-ins are state_icon, state_text, workspace, branch, and git_status.
+# Custom values reported through workspace metadata use a $name token, for example $jj_status.
+# [ui.sidebar.spaces]
+# rows = [["state_icon", "workspace"], ["branch", "git_status"]]
 
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
