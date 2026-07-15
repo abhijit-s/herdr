@@ -269,6 +269,20 @@ terminal area. It receives all terminal input, including Escape, and closes
 when the command exits or a `popup.close` request is sent. Dimensions smaller
 than the popup minimum are clamped.
 
+Declare the placement directly on a plugin pane entrypoint when the pane should
+always be transient:
+
+```toml
+[[panes]]
+id = "picker"
+title = "Picker"
+platforms = ["linux", "macos"]
+placement = "popup"
+width = "80%"
+height = 20
+command = ["sh", "picker.sh"]
+```
+
 Split, tab, zoomed, and overlay plugin panes are normal Herdr panes after they
 open. Plugins can call standard pane APIs such as `pane.move`, `pane.swap`,
 `pane.resize`, and `pane.zoom` through the socket or CLI; Herdr keeps plugin

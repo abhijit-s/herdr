@@ -163,10 +163,33 @@ focus_agent = "prefix+alt+1..9"
 ```toml
 [[keys.command]]
 key = "prefix+alt+g"
-type = "pane"
+type = "popup"
 command = "lazygit"
 description = "run lazygit"
+width = "80%"
+height = "80%"
 ```
+
+`type = "popup"` は、タブレイアウトを変更せずにセッションモーダルなポップアップを開きます。
+ポップアップは、コマンドが終了するまで Escape を含むすべてのターミナル入力を受け取ります。
+`width` と `height` は任意です。省略するとデフォルトの半分のサイズになり、数値ならターミナルセル数、`"80%"` のような文字列ならターミナル領域に対する割合を指定できます。
+寸法にはポップアップの枠が含まれ、小さすぎる値は最小サイズに制限されます。
+ポップアップコマンドは `HERDR_PANE_ID` を受け取りません。背後のタイルペインには `HERDR_ACTIVE_PANE_ID` を使ってください。
+
+Unix と macOS では、分割やタブを追加せずに一時的なターミナルを開くこともできます:
+
+```toml
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+command = "exec \"${SHELL:-sh}\""
+description = "open scratch terminal"
+width = "80%"
+height = "80%"
+```
+
+Windows では、代わりに `command = "powershell.exe -NoLogo"` のようなシェルコマンドを使ってください。
+シェルを終了するとポップアップが閉じ、タイル表示に戻ります。
 
 `type = "pane"` は一時的なペインを開き、コマンドの終了時に閉じます。
 
