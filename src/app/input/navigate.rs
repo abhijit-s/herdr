@@ -836,6 +836,7 @@ impl App {
             crate::config::CustomCommandAction::Pane => {
                 self.spawn_pane_command(&binding.command, Vec::new())
             }
+            crate::config::CustomCommandAction::Popup => self.spawn_custom_popup_command(&binding),
             crate::config::CustomCommandAction::PluginAction => self
                 .invoke_plugin_action_from_keybind(binding.command.clone())
                 .map_err(std::io::Error::other),
@@ -854,6 +855,21 @@ impl App {
                 finish_custom_command_context(&mut self.state, context, previous_mode);
             }
         }
+    }
+
+    fn spawn_custom_popup_command(
+        &mut self,
+        binding: &crate::config::CustomCommandKeybind,
+    ) -> io::Result<()> {
+        self.spawn_popup_shell_command(
+            &binding.command,
+            None,
+            self.custom_command_env().0,
+            crate::app::popup::PopupGeometry {
+                width: binding.width,
+                height: binding.height,
+            },
+        )
     }
 
     fn custom_command_env(&self) -> (Vec<(String, String)>, Option<std::path::PathBuf>) {
@@ -3068,6 +3084,8 @@ navigate_pane_down = "ctrl+j"
             command,
             action: crate::config::CustomCommandAction::Shell,
             description: None,
+            width: None,
+            height: None,
         }];
 
         app.handle_key(TerminalKey::new(
@@ -3161,6 +3179,8 @@ navigate_pane_down = "ctrl+j"
             command,
             action: crate::config::CustomCommandAction::Pane,
             description: None,
+            width: None,
+            height: None,
         }];
 
         app.handle_key(TerminalKey::new(

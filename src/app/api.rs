@@ -5,6 +5,7 @@ mod agents;
 mod env;
 mod integrations;
 mod layouts;
+mod pane_graphics;
 mod panes;
 pub(crate) mod plugins;
 mod responses;
@@ -163,6 +164,15 @@ impl App {
         }
 
         if let AppEvent::PaneDied { pane_id } = &ev {
+            if self
+                .state
+                .popup_pane
+                .as_ref()
+                .is_some_and(|popup| popup.pane_id == *pane_id)
+            {
+                self.close_popup_pane();
+                return;
+            }
             let previous_toast = self.state.toast.clone();
             if let Some(update) = self.state.publish_pane_process_exit_if_agent(*pane_id) {
                 self.sync_full_lifecycle_authority_detection_pauses();
@@ -1028,6 +1038,31 @@ impl App {
             Method::PaneFocus(target) => return self.handle_pane_focus(request.id, target),
             Method::PaneRename(params) => return self.handle_pane_rename(request.id, params),
             Method::PaneRead(params) => return self.handle_pane_read(request.id, params),
+            Method::PaneGraphicsSet(params) => {
+                return self.handle_pane_graphics_set(request.id, params);
+            }
+            Method::PaneGraphicsClear(params) => {
+                return self.handle_pane_graphics_clear(request.id, params);
+            }
+            Method::PaneGraphicsInfo(params) => {
+                return self.handle_pane_graphics_info(request.id, params);
+            }
+            Method::PaneGraphicsStream(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "stream_transport_required",
+                    "pane.graphics.stream requires the streaming socket transport",
+                );
+            }
+            Method::PaneGraphicsStreamSet(params) => {
+                return self.handle_pane_graphics_stream_set(request.id, params);
+            }
+            Method::PaneGraphicsStreamOpen(params) => {
+                return self.handle_pane_graphics_stream_open(request.id, params);
+            }
+            Method::PaneGraphicsStreamClose(params) => {
+                return self.handle_pane_graphics_stream_close(request.id, params);
+            }
             Method::PaneReportAgent(params) => {
                 return self.handle_pane_report_agent(request.id, params);
             }
@@ -1048,6 +1083,13 @@ impl App {
                 return self.handle_pane_send_input(request.id, params)
             }
             Method::PaneClose(target) => return self.handle_pane_close(request.id, target),
+            Method::PopupClose(_) => {
+                return if self.close_popup_pane() {
+                    responses::encode_success(request.id, ResponseResult::Ok {})
+                } else {
+                    responses::encode_error(request.id, "popup_not_open", "no popup is open")
+                };
+            }
             Method::PaneSendKeys(params) => return self.handle_pane_send_keys(request.id, params),
             Method::IntegrationInstall(params) => {
                 return self.handle_integration_install(request.id, params);

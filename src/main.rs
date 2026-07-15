@@ -79,6 +79,7 @@ mod persist;
 mod platform;
 mod plugin_command;
 mod plugin_paths;
+mod popup_size;
 mod product_announcements;
 mod protocol;
 mod pty;
@@ -222,11 +223,15 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Custom commands use the same binding syntax.
 # type = "shell" runs detached in the background.
 # type = "pane" opens a temporary pane and closes it when the command exits.
+# type = "popup" opens a session-modal terminal without changing the tab layout.
+# Popup width and height accept terminal cells or percentages such as "80%".
 # On Windows, command strings run through cmd.exe /d /c.
 # [[keys.command]]
 # key = "prefix+alt+g"
-# type = "pane"
+# type = "popup"
 # command = "lazygit"
+# width = "80%"
+# height = "80%"
 
 # Legacy indexed shortcut config is still parsed for compatibility.
 # Prefer switch_tab, switch_workspace, and focus_agent for new configs.

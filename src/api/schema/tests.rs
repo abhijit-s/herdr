@@ -846,6 +846,8 @@ fn plugin_link_list_unlink_round_trip() {
             description: None,
             platforms: None,
             placement: PluginPanePlacement::Overlay,
+            width: None,
+            height: None,
             command: vec!["bun".into(), "run".into(), "board.ts".into()],
         }],
         link_handlers: vec![PluginManifestLinkHandler {
@@ -1184,10 +1186,12 @@ fn plugin_pane_open_request_round_trips() {
         method: Method::PluginPaneOpen(PluginPaneOpenParams {
             plugin_id: "example.board".into(),
             entrypoint: "board".into(),
-            placement: Some(PluginPanePlacement::Zoomed),
+            placement: Some(PluginPanePlacement::Popup),
+            width: Some(crate::popup_size::PopupSize::Cells(90)),
+            height: Some(crate::popup_size::PopupSize::Percent(80)),
             workspace_id: None,
-            target_pane_id: Some("1-1".into()),
-            direction: Some(SplitDirection::Right),
+            target_pane_id: None,
+            direction: None,
             cwd: Some("/tmp".into()),
             focus: true,
             env: [("HERDR_ROLE".to_string(), "board".to_string())].into(),
@@ -1196,7 +1200,23 @@ fn plugin_pane_open_request_round_trips() {
 
     let json = serde_json::to_value(&request).unwrap();
     assert_eq!(json["method"], "plugin.pane.open");
+    assert_eq!(json["params"]["placement"], "popup");
+    assert_eq!(json["params"]["width"], 90);
+    assert_eq!(json["params"]["height"], "80%");
     assert_eq!(json["params"]["env"]["HERDR_ROLE"], "board");
     let restored: Request = serde_json::from_value(json).unwrap();
     assert_eq!(restored, request);
+}
+
+#[test]
+fn popup_close_request_round_trips() {
+    let request = Request {
+        id: "popup-close".into(),
+        method: Method::PopupClose(EmptyParams::default()),
+    };
+
+    let json = serde_json::to_value(request).unwrap();
+
+    assert_eq!(json["method"], "popup.close");
+    assert_eq!(json["params"], serde_json::json!({}));
 }

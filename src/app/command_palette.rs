@@ -469,6 +469,8 @@ mod tests {
                 command: "swap-pane-down".to_string(),
                 action: crate::config::CustomCommandAction::Pane,
                 description: Some("swap pane down".to_string()),
+                width: None,
+                height: None,
             },
             CustomCommandKeybind {
                 bindings: crate::config::ActionKeybinds::default(),
@@ -477,6 +479,8 @@ mod tests {
                 command: "deploy".to_string(),
                 action: crate::config::CustomCommandAction::Shell,
                 description: Some("ship it".to_string()),
+                width: None,
+                height: None,
             },
         ];
         let custom = custom_entries_from_config(&customs);

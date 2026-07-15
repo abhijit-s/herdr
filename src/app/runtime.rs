@@ -142,7 +142,7 @@ impl App {
                 let key_id = repeat_key_identity(&key);
                 match key.kind {
                     crossterm::event::KeyEventKind::Press => {
-                        if self.state.mode == Mode::Terminal {
+                        if self.state.popup_pane.is_some() || self.state.mode == Mode::Terminal {
                             self.suppressed_repeat_keys.remove(&key_id);
                         } else {
                             self.suppressed_repeat_keys.insert(key_id);
@@ -151,7 +151,7 @@ impl App {
                         true
                     }
                     crossterm::event::KeyEventKind::Repeat => {
-                        if self.state.mode == Mode::Terminal
+                        if (self.state.popup_pane.is_some() || self.state.mode == Mode::Terminal)
                             && !self.suppressed_repeat_keys.contains(&key_id)
                         {
                             self.handle_key(key).await;
@@ -171,7 +171,7 @@ impl App {
                 true
             }
             crate::raw_input::RawInputEvent::Mouse(mouse) => {
-                if self.state.mouse_capture {
+                if self.state.popup_pane.is_some() || self.state.mouse_capture {
                     self.handle_mouse(mouse);
                 } else {
                     self.state

@@ -178,12 +178,38 @@ Custom commands use the same keybinding syntax.
 ```toml
 [[keys.command]]
 key = "prefix+alt+g"
-type = "pane"
+type = "popup"
 command = "lazygit"
 description = "run lazygit"
+width = "80%"
+height = "80%"
 ```
 
-`type = "pane"` opens a temporary pane and closes it when the command exits.
+`type = "popup"` opens a session-modal popup without changing the tab layout.
+The popup receives all terminal input, including Escape, until its command
+exits. `width` and `height` are optional; omit them for the default half-size
+popup, use numbers for terminal cells, or use strings like `"80%"` for a
+percentage of the terminal area. Dimensions include the popup border, and
+values smaller than the popup minimum are clamped. Popup commands do not receive
+`HERDR_PANE_ID`; use `HERDR_ACTIVE_PANE_ID` for the underlying tiled pane.
+
+On Unix and macOS, a popup command can also provide an ad-hoc terminal without
+adding a split or tab:
+
+```toml
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+command = "exec \"${SHELL:-sh}\""
+description = "open scratch terminal"
+width = "80%"
+height = "80%"
+```
+
+On Windows, use a shell command such as `command = "powershell.exe -NoLogo"`
+instead. Exit the shell to close the popup and restore the tiled terminal view.
+
+`type = "pane"` opens a temporary zoomed pane and closes it when the command exits.
 
 `type = "shell"` runs detached in the background.
 
