@@ -572,6 +572,12 @@
           "description": "Maximum sidebar width (columns) when expanded."
         },
         {
+          "key": "ui.sidebar_start_collapsed",
+          "type": "boolean",
+          "default": "false",
+          "description": "Start Herdr with the sidebar collapsed. Changes take effect on the next launch."
+        },
+        {
           "key": "ui.sidebar_collapsed_mode",
           "type": "enum",
           "default": "compact",

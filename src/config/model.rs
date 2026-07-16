@@ -850,6 +850,8 @@ pub struct UiConfig {
     pub sidebar_min_width: u16,
     /// Maximum sidebar width (columns) when expanded. Default: 36.
     pub sidebar_max_width: u16,
+    /// Start with the sidebar collapsed. Default: false.
+    pub sidebar_start_collapsed: bool,
     /// Collapsed sidebar presentation. Default: compact.
     pub sidebar_collapsed_mode: SidebarCollapsedModeConfig,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
@@ -1063,6 +1065,7 @@ impl Default for UiConfig {
             sidebar_width: 26,
             sidebar_min_width: 18,
             sidebar_max_width: 36,
+            sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
@@ -1447,6 +1450,19 @@ mobile_width_threshold = 96
         assert_eq!(config.ui.sidebar_min_width, 12);
         assert_eq!(config.ui.sidebar_max_width, 80);
         assert_eq!(config.ui.mobile_width_threshold, 96);
+    }
+
+    #[test]
+    fn sidebar_start_collapsed_defaults_off_and_parses_on() {
+        let default_config = Config::default();
+        assert!(!default_config.ui.sidebar_start_collapsed);
+
+        let toml = r#"
+[ui]
+sidebar_start_collapsed = true
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.ui.sidebar_start_collapsed);
     }
 
     #[test]

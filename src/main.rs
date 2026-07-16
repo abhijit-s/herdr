@@ -253,6 +253,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Maximum sidebar width when expanded (columns)
 # sidebar_max_width = 36
 
+# Start with the sidebar collapsed. Changes take effect on the next launch.
+# sidebar_start_collapsed = false
+
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
 

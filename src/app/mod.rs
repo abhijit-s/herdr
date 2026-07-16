@@ -618,7 +618,7 @@ impl App {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             sidebar_width_source,
             sidebar_width_auto: false,
-            sidebar_collapsed: false,
+            sidebar_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
             sidebar_section_split,
             agent_panel_sort,
@@ -2403,6 +2403,17 @@ mod tests {
     }
 
     #[test]
+    fn startup_uses_configured_sidebar_state() {
+        let mut config = Config::default();
+        config.ui.sidebar_start_collapsed = true;
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+
+        assert!(app.state.sidebar_collapsed);
+    }
+
+    #[test]
     fn startup_uses_redraw_on_focus_gained_config() {
         let mut config = Config::default();
         config.ui.redraw_on_focus_gained = false;
@@ -2798,6 +2809,25 @@ mod tests {
         let report = app.reload_config();
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Partial);
         assert_eq!(app.state.sidebar_agents, previous_agents);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_does_not_reset_sidebar_to_startup_state() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-sidebar-start-collapsed");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        assert!(!app.state.sidebar_collapsed);
+
+        std::fs::write(&path, "[ui]\nsidebar_start_collapsed = true\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(!app.state.sidebar_collapsed);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

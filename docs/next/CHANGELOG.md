@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Added `ui.sidebar_start_collapsed` to launch Herdr with the sidebar collapsed. (#1463)
 - Added macOS support for the `HERDR_AGENT=<agent>` foreground-process hint, allowing agents hidden behind host-visible wrappers such as `nono` to use the named agent's screen manifest. (#679)
 
 ### Fixed
