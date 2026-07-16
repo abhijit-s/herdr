@@ -78,12 +78,24 @@ impl App {
         ))
     }
 
+    fn show_worktree_error(&mut self, message: impl Into<String>) {
+        let previous = self.state.toast.take();
+        self.state.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::NeedsAttention,
+            title: "Worktree".to_string(),
+            context: message.into(),
+            position: None,
+            target: None,
+        });
+        self.sync_toast_deadline(previous);
+    }
+
     pub(crate) fn open_new_linked_worktree_dialog(&mut self, ws_idx: usize) {
         let (existing_membership, space, source_checkout_path, source_workspace_id) =
             match self.worktree_source_metadata(ws_idx) {
                 Ok(metadata) => metadata,
                 Err(err) => {
-                    self.state.config_diagnostic = Some(err);
+                    self.show_worktree_error(err);
                     return;
                 }
             };
@@ -133,8 +145,7 @@ impl App {
             .worktree_space()
             .is_some_and(|space| space.is_linked_worktree)
         {
-            self.state.config_diagnostic =
-                Some("This workspace is not a Herdr-managed worktree checkout.".into());
+            self.show_worktree_error("This workspace is not a Herdr-managed worktree checkout.");
             return;
         }
         let Some(space) = ws.worktree_space().cloned() else {
@@ -157,7 +168,7 @@ impl App {
             match self.worktree_source_metadata(ws_idx) {
                 Ok(metadata) => metadata,
                 Err(err) => {
-                    self.state.config_diagnostic = Some(err);
+                    self.show_worktree_error(err);
                     return;
                 }
             };
@@ -165,7 +176,7 @@ impl App {
         let list = match crate::worktree::list_existing_worktrees(&space.repo_root) {
             Ok(list) => list,
             Err(err) => {
-                self.state.config_diagnostic = Some(err);
+                self.show_worktree_error(err);
                 return;
             }
         };
@@ -213,7 +224,7 @@ impl App {
             .collect::<Vec<_>>();
 
         if entries.is_empty() {
-            self.state.config_diagnostic = Some("No Git worktrees found for this repo.".into());
+            self.show_worktree_error("No Git worktrees found for this repo.");
             return;
         }
 
@@ -1509,16 +1520,16 @@ mod tests {
         assert_eq!(app.state.mode, Mode::Navigate);
         assert!(app.state.worktree_create.is_none());
         assert_eq!(
-            app.state.config_diagnostic.as_deref(),
+            app.state.toast.as_ref().map(|toast| toast.context.as_str()),
             Some("New and open worktree actions start from the repo parent workspace.")
         );
 
-        app.state.config_diagnostic = None;
+        app.state.toast = None;
         app.open_existing_worktree_dialog(0);
 
         assert!(app.state.worktree_open.is_none());
         assert_eq!(
-            app.state.config_diagnostic.as_deref(),
+            app.state.toast.as_ref().map(|toast| toast.context.as_str()),
             Some("New and open worktree actions start from the repo parent workspace.")
         );
     }
