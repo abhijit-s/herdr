@@ -869,6 +869,16 @@ impl AppState {
                     }) => {
                         if self.active == Some(ws_idx) {
                             self.mode = Mode::Terminal;
+                            // Dropping a tab back onto its own slot is a no-op
+                            // reorder (see Workspace::move_tab); treat it as the
+                            // plain click it visually was instead of swallowing it.
+                            let is_self_drop =
+                                insert_idx == source_tab_idx || insert_idx == source_tab_idx + 1;
+                            if is_self_drop {
+                                return Some(MouseAction::FocusTab {
+                                    tab_idx: source_tab_idx,
+                                });
+                            }
                             return Some(MouseAction::MoveTab {
                                 ws_idx,
                                 source_tab_idx,
@@ -3286,6 +3296,92 @@ mod tests {
             tab_bar.y,
         ));
         assert_eq!(app.state.workspaces[0].active_tab, 0);
+    }
+
+    #[test]
+    fn jittery_click_below_drag_threshold_still_switches_tabs() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        ws.test_add_tab(Some("two"));
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let second_tab = app.state.view.tab_hit_areas[1];
+        let click_x = second_tab.x + 1;
+        let click_y = second_tab.y;
+
+        // A sub-threshold wobble (e.g. real-mouse jitter during a click) must
+        // not arm a reorder drag, and the click must still land as a focus.
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            click_x,
+            click_y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            click_x + 1,
+            click_y,
+        ));
+        assert!(
+            app.state.drag.is_none(),
+            "a 1-cell wobble should stay below TAB_DRAG_THRESHOLD"
+        );
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            click_x + 1,
+            click_y,
+        ));
+
+        assert_eq!(app.state.workspaces[0].active_tab, 1);
+    }
+
+    #[test]
+    fn tab_drag_that_ends_on_its_own_slot_still_focuses_tab() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("one");
+        ws.test_add_tab(Some("two"));
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let second_tab = app.state.view.tab_hit_areas[1];
+        let click_x = second_tab.x + 1;
+        let click_y = second_tab.y;
+
+        // Even a drag that clears the threshold but is released back over the
+        // same tab (a no-op reorder) must act as a click, not a swallowed no-op.
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            click_x,
+            click_y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            click_x + TAB_DRAG_THRESHOLD,
+            click_y,
+        ));
+        assert!(
+            app.state.drag.is_some(),
+            "drag should be armed past threshold"
+        );
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            click_x,
+            click_y,
+        ));
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            click_x,
+            click_y,
+        ));
+
+        assert_eq!(app.state.workspaces[0].active_tab, 1);
+        assert_eq!(app.state.workspaces[0].tabs.len(), 2);
     }
 
     #[test]
