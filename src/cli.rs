@@ -17,6 +17,7 @@ mod integration;
 mod notification;
 mod pane;
 mod plugin;
+mod protocol_guard;
 mod runtime;
 mod server;
 mod spec;
@@ -937,7 +938,9 @@ pub(super) fn wait_for_agent_change(
     timeout_message: &str,
 ) -> std::io::Result<i32> {
     let read_timeout = timeout_ms.map(Duration::from_millis);
-    let (ack, mut stream) = ApiClient::local()
+    let client = ApiClient::local();
+    ensure_server_protocol_compatible(&client, &request.id)?;
+    let (ack, mut stream) = client
         .subscribe_value(&request, read_timeout)
         .map_err(api_client_error_to_io)?;
     if let Err(err) = crate::api::client::parse_response_value(ack) {
@@ -990,9 +993,41 @@ pub(super) fn send_ok_request(method: Method) -> std::io::Result<i32> {
 }
 
 pub(super) fn send_request(request: &Request) -> std::io::Result<serde_json::Value> {
+    let client = ApiClient::local();
+    ensure_server_protocol_compatible(&client, &request.id)?;
+    client
+        .request_value(request)
+        .map_err(api_client_error_to_io)
+}
+
+pub(super) fn send_request_unchecked(request: &Request) -> std::io::Result<serde_json::Value> {
     ApiClient::local()
         .request_value(request)
         .map_err(api_client_error_to_io)
+}
+
+fn ensure_server_protocol_compatible(client: &ApiClient, request_id: &str) -> std::io::Result<()> {
+    let status = client.status().map_err(api_client_error_to_io)?;
+    let server_protocol = status
+        .protocol
+        .ok_or_else(|| std::io::Error::other("server ping did not include a protocol version"))?;
+    let Some(response) = protocol_guard::mismatch_response(
+        request_id,
+        server_protocol,
+        &crate::session::active_restart_after_update_guidance(),
+    ) else {
+        return Ok(());
+    };
+
+    eprintln!(
+        "{}",
+        serde_json::to_string(&response).map_err(std::io::Error::other)?
+    );
+    Err(protocol_guard::reported_error())
+}
+
+pub(crate) fn protocol_mismatch_was_reported(err: &std::io::Error) -> bool {
+    protocol_guard::was_reported(err)
 }
 
 fn api_timeout_error(err: &std::io::Error) -> bool {

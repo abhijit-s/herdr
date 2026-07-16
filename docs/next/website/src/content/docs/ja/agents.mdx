@@ -47,7 +47,7 @@ Claude Code、Codex、GitHub Copilot CLI、Droid、Qoder CLI、Cursor Agent CLI 
 
 ## VM とサンドボックスラッパー
 
-Linux では、VM、Bubblewrap、`fence` のようなラッパーがホストの `/proc` から実際のエージェントプロセスを隠すことがあります。コマンドに `HERDR_AGENT=<agent>` を設定して (例: `HERDR_AGENT=claude fence -- claude`)、どの既存エージェントのスクリーンマニフェストを使うべきか Herdr に伝えてください。このヒントはそのフォアグラウンドプロセスにスコープされます。継承されるすべてのフォアグラウンドプロセスをそのエージェントとして扱いたいのでない限り、シェルからグローバルに export するのは避けてください。
+Linux と macOS では、ホストから見えるラッパーが実際のエージェントプロセスを Herdr から隠すことがあります。ラッパーのコマンドに `HERDR_AGENT=<agent>` を設定して、どの既存エージェントのスクリーンマニフェストを使うべきか Herdr に伝えてください。たとえば、Linux では `HERDR_AGENT=claude fence -- claude`、macOS では `HERDR_AGENT=claude nono run --profile claude-code -- claude` を実行します。このヒントはそのフォアグラウンドプロセスにスコープされます。VM やコンテナの内部だけで設定しても Herdr からは見えません。また、継承されるすべてのフォアグラウンドプロセスをそのエージェントとして扱いたいのでない限り、グローバルな export は避けてください。
 
 ## blocked 状態
 

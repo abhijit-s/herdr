@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use support::{
     cleanup_test_base, register_runtime_dir, register_spawned_herdr_pid,
-    unregister_spawned_herdr_pid,
+    unregister_spawned_herdr_pid, CURRENT_PROTOCOL,
 };
 
 const WORKTREE_BOOTSTRAP_MANAGED_COMPONENT: &str = "example.worktree-bootstrap-ef876653ffc3";
@@ -520,6 +520,52 @@ fn send_request(socket_path: &Path, json: &str) -> serde_json::Value {
     serde_json::from_str(&line).unwrap()
 }
 
+fn write_fake_pong(
+    stream: &mut UnixStream,
+    request: &serde_json::Value,
+    version: &str,
+    protocol: u32,
+) {
+    writeln!(
+        stream,
+        "{}",
+        serde_json::json!({
+            "id": request["id"],
+            "result": {
+                "type": "pong",
+                "version": version,
+                "protocol": protocol,
+                "capabilities": {
+                    "live_handoff": true,
+                    "detached_server_daemon": true
+                }
+            }
+        })
+    )
+    .unwrap();
+    stream.flush().unwrap();
+}
+
+fn accept_fake_cli_operation(listener: &UnixListener) -> (UnixStream, String) {
+    loop {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        reader.read_line(&mut line).unwrap();
+        let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if request["method"] != "ping" {
+            return (stream, line);
+        }
+
+        write_fake_pong(
+            &mut stream,
+            &request,
+            "different-build-same-protocol",
+            CURRENT_PROTOCOL,
+        );
+    }
+}
+
 fn run_claude_hook(action: &str, hook_input: &str) -> Option<serde_json::Value> {
     run_shell_hook(
         "src/integration/assets/claude/herdr-agent-state.sh",
@@ -835,10 +881,7 @@ fn pane_run_sends_one_send_input_request_with_enter_key() {
     let listener = UnixListener::bind(&socket_path).unwrap();
 
     let server = thread::spawn(move || {
-        let (mut first_stream, _) = listener.accept().unwrap();
-        let mut first_line = String::new();
-        let mut first_reader = BufReader::new(first_stream.try_clone().unwrap());
-        first_reader.read_line(&mut first_line).unwrap();
+        let (mut first_stream, first_line) = accept_fake_cli_operation(&listener);
         first_stream
             .write_all(br#"{"id":"cli:request","result":{"type":"ok"}}"#)
             .unwrap();
@@ -905,10 +948,7 @@ fn workspace_report_metadata_sends_token_patch() {
     let listener = UnixListener::bind(&socket_path).unwrap();
 
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut line = String::new();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        reader.read_line(&mut line).unwrap();
+        let (mut stream, line) = accept_fake_cli_operation(&listener);
         stream
             .write_all(br#"{"id":"cli:request","result":{"type":"ok"}}"#)
             .unwrap();
@@ -960,10 +1000,7 @@ fn pane_report_metadata_sends_presentation_request() {
     let listener = UnixListener::bind(&socket_path).unwrap();
 
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut line = String::new();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        reader.read_line(&mut line).unwrap();
+        let (mut stream, line) = accept_fake_cli_operation(&listener);
         stream
             .write_all(br#"{"id":"cli:request","result":{"type":"ok"}}"#)
             .unwrap();
@@ -1243,37 +1280,21 @@ fn api_snapshot_prints_live_session_snapshot() {
     let server = thread::spawn({
         let socket_path = socket_path.clone();
         move || {
-            listener.set_nonblocking(true).unwrap();
-            let deadline = Instant::now() + Duration::from_millis(700);
-            while Instant::now() < deadline {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        let mut line = String::new();
-                        let mut reader = BufReader::new(stream.try_clone().unwrap());
-                        reader.read_line(&mut line).unwrap();
-                        let request: serde_json::Value = serde_json::from_str(&line).unwrap();
-                        assert_eq!(request["method"], "session.snapshot");
-                        assert_eq!(request["id"], "cli:api:snapshot");
+            let (mut stream, line) = accept_fake_cli_operation(&listener);
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request["method"], "session.snapshot");
+            assert_eq!(request["id"], "cli:api:snapshot");
 
-                        let response = serde_json::json!({
-                            "id": "cli:api:snapshot",
-                            "result": {
-                                "type": "ok",
-                                "marker": "snapshot-passthrough"
-                            }
-                        });
-                        writeln!(stream, "{response}").unwrap();
-                        stream.flush().unwrap();
-                        let _ = fs::remove_file(socket_path);
-                        return;
-                    }
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(err) => panic!("accept failed: {err}"),
+            let response = serde_json::json!({
+                "id": "cli:api:snapshot",
+                "result": {
+                    "type": "ok",
+                    "marker": "snapshot-passthrough"
                 }
-            }
-            panic!("CLI did not connect to fake API socket");
+            });
+            writeln!(stream, "{response}").unwrap();
+            stream.flush().unwrap();
+            let _ = fs::remove_file(socket_path);
         }
     });
 
@@ -4015,10 +4036,7 @@ command = ["sh", "-c", "echo new"]
     let listener = UnixListener::bind(&socket_path).unwrap();
     let managed_checkout_for_server = managed_checkout.clone();
     let server = thread::spawn(move || {
-        let (mut first, _) = listener.accept().unwrap();
-        let mut first_line = String::new();
-        let mut first_reader = BufReader::new(first.try_clone().unwrap());
-        first_reader.read_line(&mut first_line).unwrap();
+        let (mut first, first_line) = accept_fake_cli_operation(&listener);
         let first_request: serde_json::Value = serde_json::from_str(&first_line).unwrap();
         assert_eq!(first_request["method"], "plugin.list");
         writeln!(
@@ -4052,10 +4070,7 @@ command = ["sh", "-c", "echo new"]
         .unwrap();
         first.flush().unwrap();
 
-        let (mut second, _) = listener.accept().unwrap();
-        let mut second_line = String::new();
-        let mut second_reader = BufReader::new(second.try_clone().unwrap());
-        second_reader.read_line(&mut second_line).unwrap();
+        let (mut second, second_line) = accept_fake_cli_operation(&listener);
         let second_request: serde_json::Value = serde_json::from_str(&second_line).unwrap();
         assert_eq!(second_request["method"], "plugin.link");
         second
@@ -4144,10 +4159,7 @@ command = ["sh", "-c", "echo install"]
     let listener = UnixListener::bind(&socket_path).unwrap();
     let managed_checkout_for_server = managed_checkout.clone();
     let server = thread::spawn(move || {
-        let (mut first, _) = listener.accept().unwrap();
-        let mut first_line = String::new();
-        let mut first_reader = BufReader::new(first.try_clone().unwrap());
-        first_reader.read_line(&mut first_line).unwrap();
+        let (mut first, first_line) = accept_fake_cli_operation(&listener);
         let first_request: serde_json::Value = serde_json::from_str(&first_line).unwrap();
         assert_eq!(first_request["method"], "plugin.list");
         first
@@ -4156,10 +4168,7 @@ command = ["sh", "-c", "echo install"]
         first.write_all(b"\n").unwrap();
         first.flush().unwrap();
 
-        let (mut second, _) = listener.accept().unwrap();
-        let mut second_line = String::new();
-        let mut second_reader = BufReader::new(second.try_clone().unwrap());
-        second_reader.read_line(&mut second_line).unwrap();
+        let (mut second, second_line) = accept_fake_cli_operation(&listener);
         let second_request: serde_json::Value = serde_json::from_str(&second_line).unwrap();
         assert_eq!(second_request["method"], "plugin.link");
         writeln!(
@@ -4185,10 +4194,7 @@ command = ["sh", "-c", "echo install"]
         .unwrap();
         second.flush().unwrap();
 
-        let (mut third, _) = listener.accept().unwrap();
-        let mut third_line = String::new();
-        let mut third_reader = BufReader::new(third.try_clone().unwrap());
-        third_reader.read_line(&mut third_line).unwrap();
+        let (mut third, third_line) = accept_fake_cli_operation(&listener);
         let third_request: serde_json::Value = serde_json::from_str(&third_line).unwrap();
         assert_eq!(third_request["method"], "plugin.unlink");
         assert_eq!(
@@ -4281,20 +4287,14 @@ command = ["sh", "-c", "echo install"]
     let listener = UnixListener::bind(&socket_path).unwrap();
     let managed_checkout_for_server = managed_checkout.clone();
     let server = thread::spawn(move || {
-        let (mut first, _) = listener.accept().unwrap();
-        let mut first_line = String::new();
-        let mut first_reader = BufReader::new(first.try_clone().unwrap());
-        first_reader.read_line(&mut first_line).unwrap();
+        let (mut first, _first_line) = accept_fake_cli_operation(&listener);
         first
             .write_all(br#"{"id":"cli:plugin","result":{"type":"plugin_list","plugins":[]}}"#)
             .unwrap();
         first.write_all(b"\n").unwrap();
         first.flush().unwrap();
 
-        let (mut second, _) = listener.accept().unwrap();
-        let mut second_line = String::new();
-        let mut second_reader = BufReader::new(second.try_clone().unwrap());
-        second_reader.read_line(&mut second_line).unwrap();
+        let (mut second, _second_line) = accept_fake_cli_operation(&listener);
         writeln!(
             second,
             "{}",
@@ -4318,10 +4318,7 @@ command = ["sh", "-c", "echo install"]
         .unwrap();
         second.flush().unwrap();
 
-        let (mut third, _) = listener.accept().unwrap();
-        let mut third_line = String::new();
-        let mut third_reader = BufReader::new(third.try_clone().unwrap());
-        third_reader.read_line(&mut third_line).unwrap();
+        let (mut third, third_line) = accept_fake_cli_operation(&listener);
         let third_request: serde_json::Value = serde_json::from_str(&third_line).unwrap();
         assert_eq!(third_request["method"], "plugin.unlink");
         third
@@ -4355,6 +4352,294 @@ command = ["sh", "-c", "echo install"]
         "checkout should stay when server cleanup fails"
     );
 
+    cleanup_test_base(&base);
+}
+
+#[test]
+fn cli_rejects_protocol_mismatch_before_wait_agent_status_request() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let socket_path = base.join("herdr.sock");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut first_stream, _) = listener.accept().unwrap();
+        let mut first_line = String::new();
+        let mut first_reader = BufReader::new(first_stream.try_clone().unwrap());
+        first_reader.read_line(&mut first_line).unwrap();
+        let first_request: serde_json::Value = serde_json::from_str(&first_line).unwrap();
+        if first_request["method"] == "ping" {
+            write_fake_pong(&mut first_stream, &first_request, "0.7.1", 14);
+        } else {
+            first_stream
+                .write_all(
+                    br#"{"id":"cli:wait:agent-status","error":{"code":"not_implemented","message":"method not implemented yet"}}"#,
+                )
+                .unwrap();
+        }
+        if first_request["method"] != "ping" {
+            first_stream.write_all(b"\n").unwrap();
+            first_stream.flush().unwrap();
+        }
+
+        let mut second_line = None;
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((second_stream, _)) => {
+                    let mut line = String::new();
+                    let mut reader = BufReader::new(second_stream);
+                    reader.read_line(&mut line).unwrap();
+                    second_line = Some(line);
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(err) => panic!("second accept failed: {err}"),
+            }
+        }
+
+        (first_line, second_line)
+    });
+
+    let waited = run_cli(
+        &socket_path,
+        &[
+            "wait",
+            "agent-status",
+            "1-1",
+            "--status",
+            "idle",
+            "--timeout",
+            "5000",
+        ],
+    );
+
+    assert_eq!(waited.status.code(), Some(1));
+    assert!(waited.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&waited.stderr).unwrap();
+    assert_eq!(error["id"], "cli:wait:agent-status");
+    assert_eq!(error["error"]["code"], "protocol_mismatch");
+    let message = error["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains(&format!("client protocol {CURRENT_PROTOCOL}")),
+        "message: {message}"
+    );
+    assert!(message.contains("server protocol 14"), "message: {message}");
+    assert!(message.contains("restart"), "message: {message}");
+
+    let (first_line, second_line) = server.join().unwrap();
+    let first_request: serde_json::Value = serde_json::from_str(&first_line).unwrap();
+    assert_eq!(first_request["method"], "ping");
+    assert!(
+        second_line.is_none(),
+        "mismatched CLI sent an operational request: {second_line:?}"
+    );
+
+    cleanup_test_base(&base);
+}
+
+#[test]
+fn cli_allows_same_protocol_different_version_and_preserves_server_error() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let socket_path = base.join("herdr.sock");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut ping_stream, _) = listener.accept().unwrap();
+        let mut ping_line = String::new();
+        BufReader::new(ping_stream.try_clone().unwrap())
+            .read_line(&mut ping_line)
+            .unwrap();
+        let ping: serde_json::Value = serde_json::from_str(&ping_line).unwrap();
+        assert_eq!(ping["method"], "ping");
+        write_fake_pong(
+            &mut ping_stream,
+            &ping,
+            "0.7.1-compatible-build",
+            CURRENT_PROTOCOL,
+        );
+
+        let (mut operation_stream, _) = listener.accept().unwrap();
+        let mut operation_line = String::new();
+        BufReader::new(operation_stream.try_clone().unwrap())
+            .read_line(&mut operation_line)
+            .unwrap();
+        let operation: serde_json::Value = serde_json::from_str(&operation_line).unwrap();
+        assert_eq!(operation["method"], "events.wait");
+        operation_stream
+            .write_all(
+                br#"{"id":"cli:wait:agent-status","error":{"code":"not_implemented","message":"compatible server error"}}"#,
+            )
+            .unwrap();
+        operation_stream.write_all(b"\n").unwrap();
+        operation_stream.flush().unwrap();
+    });
+
+    let waited = run_cli(
+        &socket_path,
+        &[
+            "wait",
+            "agent-status",
+            "1-1",
+            "--status",
+            "idle",
+            "--timeout",
+            "5000",
+        ],
+    );
+
+    assert_eq!(waited.status.code(), Some(1));
+    assert!(waited.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&waited.stderr).unwrap();
+    assert_eq!(error["id"], "cli:wait:agent-status");
+    assert_eq!(error["error"]["code"], "not_implemented");
+    assert_eq!(error["error"]["message"], "compatible server error");
+    server.join().unwrap();
+    cleanup_test_base(&base);
+}
+
+#[test]
+fn agent_wait_rechecks_protocol_before_subscription() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let socket_path = base.join("herdr.sock");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut first_ping_stream, _) = listener.accept().unwrap();
+        let mut first_ping_line = String::new();
+        BufReader::new(first_ping_stream.try_clone().unwrap())
+            .read_line(&mut first_ping_line)
+            .unwrap();
+        let first_ping: serde_json::Value = serde_json::from_str(&first_ping_line).unwrap();
+        assert_eq!(first_ping["method"], "ping");
+        write_fake_pong(
+            &mut first_ping_stream,
+            &first_ping,
+            "current",
+            CURRENT_PROTOCOL,
+        );
+
+        let (mut get_stream, _) = listener.accept().unwrap();
+        let mut get_line = String::new();
+        BufReader::new(get_stream.try_clone().unwrap())
+            .read_line(&mut get_line)
+            .unwrap();
+        let get_request: serde_json::Value = serde_json::from_str(&get_line).unwrap();
+        assert_eq!(get_request["method"], "agent.get");
+        get_stream
+            .write_all(
+                br#"{"id":"cli:agent:wait:resolve","result":{"type":"agent_info","agent":{"pane_id":"w1:p1","agent_status":"working"}}}"#,
+            )
+            .unwrap();
+        get_stream.write_all(b"\n").unwrap();
+        get_stream.flush().unwrap();
+
+        let (mut second_ping_stream, _) = listener.accept().unwrap();
+        let mut second_ping_line = String::new();
+        BufReader::new(second_ping_stream.try_clone().unwrap())
+            .read_line(&mut second_ping_line)
+            .unwrap();
+        let second_ping: serde_json::Value = serde_json::from_str(&second_ping_line).unwrap();
+        assert_eq!(second_ping["method"], "ping");
+        write_fake_pong(&mut second_ping_stream, &second_ping, "0.7.1", 14);
+
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok(_) => panic!("agent wait dispatched events.subscribe after mismatch"),
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(err) => panic!("accept failed: {err}"),
+            }
+        }
+    });
+
+    let waited = run_cli(
+        &socket_path,
+        &[
+            "agent",
+            "wait",
+            "worker",
+            "--status",
+            "blocked",
+            "--timeout",
+            "5000",
+        ],
+    );
+
+    assert_eq!(waited.status.code(), Some(1));
+    assert!(waited.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&waited.stderr).unwrap();
+    assert_eq!(error["id"], "cli:agent:wait");
+    assert_eq!(error["error"]["code"], "protocol_mismatch");
+    server.join().unwrap();
+    cleanup_test_base(&base);
+}
+
+#[test]
+fn server_live_handoff_bypasses_protocol_guard() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let socket_path = base.join("herdr.sock");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(request["method"], "server.live_handoff");
+        stream
+            .write_all(br#"{"id":"cli:server:live-handoff","result":{"type":"ok"}}"#)
+            .unwrap();
+        stream.write_all(b"\n").unwrap();
+        stream.flush().unwrap();
+    });
+
+    let handoff = run_cli(&socket_path, &["server", "live-handoff"]);
+    assert!(
+        handoff.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&handoff.stderr)
+    );
+    server.join().unwrap();
+    cleanup_test_base(&base);
+}
+
+#[test]
+fn plugin_list_preserves_protocol_mismatch_envelope() {
+    let base = unique_test_dir();
+    fs::create_dir_all(&base).unwrap();
+    let socket_path = base.join("herdr.sock");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(request["method"], "ping");
+        write_fake_pong(&mut stream, &request, "0.7.1", 14);
+    });
+
+    let listed = run_cli(&socket_path, &["plugin", "list", "--json"]);
+    assert_eq!(listed.status.code(), Some(1));
+    assert!(listed.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&listed.stderr).unwrap();
+    assert_eq!(error["id"], "cli:plugin");
+    assert_eq!(error["error"]["code"], "protocol_mismatch");
+    server.join().unwrap();
     cleanup_test_base(&base);
 }
 

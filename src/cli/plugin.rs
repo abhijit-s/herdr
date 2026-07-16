@@ -932,6 +932,9 @@ fn register_installed_plugin(
                             ),
                         )));
                     }
+                    Err(unlink_err) if super::protocol_mismatch_was_reported(&unlink_err) => {
+                        return Err(InstallFailure::KeepCheckout(unlink_err));
+                    }
                     Err(unlink_err) => {
                         return Err(InstallFailure::KeepCheckout(std::io::Error::other(
                             format!(
