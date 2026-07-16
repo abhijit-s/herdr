@@ -82,8 +82,8 @@ impl App {
         let previous = self.state.toast.take();
         self.state.toast = Some(crate::app::state::ToastNotification {
             kind: crate::app::state::ToastKind::NeedsAttention,
-            title: "Worktree".to_string(),
-            context: message.into(),
+            title: message.into(),
+            context: String::new(),
             position: None,
             target: None,
         });
@@ -1520,7 +1520,7 @@ mod tests {
         assert_eq!(app.state.mode, Mode::Navigate);
         assert!(app.state.worktree_create.is_none());
         assert_eq!(
-            app.state.toast.as_ref().map(|toast| toast.context.as_str()),
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
             Some("New and open worktree actions start from the repo parent workspace.")
         );
 
@@ -1529,7 +1529,7 @@ mod tests {
 
         assert!(app.state.worktree_open.is_none());
         assert_eq!(
-            app.state.toast.as_ref().map(|toast| toast.context.as_str()),
+            app.state.toast.as_ref().map(|toast| toast.title.as_str()),
             Some("New and open worktree actions start from the repo parent workspace.")
         );
     }
