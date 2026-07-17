@@ -1,2 +1,10 @@
 [tools]
+# Requires Zig 0.15.2. On macOS with Xcode 26.4+ / Tahoe SDKs, mise's raw
+# zig.org build hits a known linker bug (undefined libSystem symbols —
+# ziglang/zig#31658, ghostty-org/ghostty#11991): the SDK's libSystem.tbd
+# declares most exports only under arm64e-macos, and Zig 0.15's linker
+# won't match them for a plain arm64-macos target. Fixed upstream only in
+# Zig 0.16 (not backported). Homebrew's `zig@0.15` formula carries its own
+# backport patch and works — `brew install zig@0.15`, then point ZIG at
+# /opt/homebrew/opt/zig@0.15/bin/zig instead of this mise-managed one.
 zig = "0.15.2"
