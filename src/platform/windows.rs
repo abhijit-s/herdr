@@ -28,8 +28,8 @@ use windows_sys::{
             Ole::CF_UNICODETEXT,
             Threading::{
                 GetCurrentProcess, GetExitCodeProcess, OpenProcess, TerminateProcess,
-                DETACHED_PROCESS, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-                PROCESS_VM_READ,
+                CREATE_NO_WINDOW, DETACHED_PROCESS, PROCESS_BASIC_INFORMATION,
+                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
             },
         },
         UI::Shell::{CommandLineToArgvW, ShellExecuteW},
@@ -127,6 +127,12 @@ fn scrollback_editor_argv_with_env(
     }
     argv.push(path.display().to_string());
     Ok(argv)
+}
+
+pub(crate) fn configure_background_command_platform(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+
+    command.creation_flags(CREATE_NO_WINDOW);
 }
 
 pub fn detach_server_daemon_command(command: &mut std::process::Command) {
@@ -662,12 +668,16 @@ mod tests {
 
     use windows_sys::Win32::System::Console::{AllocConsole, FreeConsole, GetConsoleWindow};
 
-    const DETACHED_CONSOLE_TEST_CHILD_ENV: &str = "HERDR_TEST_DETACHED_CONSOLE_CHILD";
+    const CONSOLE_TEST_CHILD_ENV: &str = "HERDR_TEST_CONSOLE_CHILD_MODE";
 
     #[test]
-    fn server_daemon_command_does_not_inherit_console() {
-        if std::env::var_os(DETACHED_CONSOLE_TEST_CHILD_ENV).is_some() {
-            assert!(unsafe { GetConsoleWindow() }.is_null());
+    fn background_and_server_daemon_commands_do_not_have_consoles() {
+        if let Some(mode) = std::env::var_os(CONSOLE_TEST_CHILD_ENV) {
+            assert!(
+                unsafe { GetConsoleWindow() }.is_null(),
+                "{} child opened or inherited a console",
+                mode.to_string_lossy()
+            );
             return;
         }
 
@@ -679,26 +689,32 @@ mod tests {
         };
 
         let test_exe = std::env::current_exe().expect("resolve test executable");
-        let mut child = Command::new(test_exe);
-        child
-            .arg("server_daemon_command_does_not_inherit_console")
-            .env(DETACHED_CONSOLE_TEST_CHILD_ENV, "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        super::detach_server_daemon_command(&mut child);
+        let configurations: [(&str, fn(&mut Command)); 2] = [
+            ("background", super::configure_background_command_platform),
+            ("server daemon", super::detach_server_daemon_command),
+        ];
+        for (mode, configure) in configurations {
+            let mut child = Command::new(&test_exe);
+            child
+                .arg("background_and_server_daemon_commands_do_not_have_consoles")
+                .env(CONSOLE_TEST_CHILD_ENV, mode)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            configure(&mut child);
 
-        let status = child.status().expect("spawn detached test child");
+            let status = child.status().expect("spawn console isolation test child");
+            assert!(
+                status.success(),
+                "{mode} child opened or inherited a console"
+            );
+        }
+
         if allocated_console {
             unsafe {
                 FreeConsole();
             }
         }
-
-        assert!(
-            status.success(),
-            "detached child inherited the test console"
-        );
     }
 
     fn argv_strings(argv: &[std::ffi::OsString]) -> Vec<String> {

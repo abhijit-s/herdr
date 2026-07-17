@@ -1418,16 +1418,6 @@ impl App {
                     .clamp(self.state.sidebar_min_width, self.state.sidebar_max_width);
                 self.state.mouse_capture = config.ui.mouse_capture;
                 self.state.copy_on_select = config.ui.copy_on_select;
-                if !self.state.copy_on_select {
-                    if self.state.mode == Mode::Copy {
-                        self.state.stop_selection_autoscroll_state();
-                    } else {
-                        self.state.clear_selection();
-                    }
-                    self.last_pane_click = None;
-                    self.selection_autoscroll_deadline = None;
-                    self.selection_highlight_clear_deadline = None;
-                }
                 if self.state.redraw_on_focus_gained != config.ui.redraw_on_focus_gained {
                     self.state.request_client_config_reload = true;
                 }
@@ -2658,11 +2648,14 @@ mod tests {
         assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
         assert!(!app.state.redraw_on_focus_gained);
         assert!(!app.state.copy_on_select);
-        assert!(app.state.selection.is_none());
-        assert!(app.state.selection_autoscroll.is_none());
-        assert!(app.selection_autoscroll_deadline.is_none());
-        assert!(app.selection_highlight_clear_deadline.is_none());
-        assert!(app.last_pane_click.is_none());
+        assert!(app.state.selection.is_some());
+        assert!(app.state.selection_autoscroll.is_some());
+        assert_eq!(app.selection_autoscroll_deadline, Some(selection_deadline));
+        assert_eq!(
+            app.selection_highlight_clear_deadline,
+            Some(selection_deadline)
+        );
+        assert!(app.last_pane_click.is_some());
 
         app.state.mode = Mode::Copy;
         app.state.selection = Some(crate::selection::Selection::range(

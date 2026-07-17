@@ -33,6 +33,13 @@ pub(crate) fn pane_custom_command_pty_builder(command: &str) -> portable_pty::Co
     pane_custom_command_pty_builder_platform(command)
 }
 
+pub(crate) fn configure_background_command(command: &mut std::process::Command) {
+    configure_background_command_platform(command);
+}
+
+#[cfg(not(windows))]
+fn configure_background_command_platform(_command: &mut std::process::Command) {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PlatformCapabilities {
     pub(crate) live_handoff: bool,
