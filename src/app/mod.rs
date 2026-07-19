@@ -615,7 +615,7 @@ impl App {
             latest_release_notes_available,
             update_dismissed: false,
             config_diagnostic,
-            toast: initial_toast,
+            toast: initial_toast.clone(),
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -736,7 +736,15 @@ impl App {
 
         Self {
             config_diagnostic_deadline: None,
-            toast_deadline: None,
+            toast_deadline: initial_toast.as_ref().map(|toast| {
+                let duration = match toast.kind {
+                    crate::app::state::ToastKind::NeedsAttention => std::time::Duration::from_secs(8),
+                    crate::app::state::ToastKind::Finished => std::time::Duration::from_secs(5),
+                    crate::app::state::ToastKind::UpdateInstalled => std::time::Duration::from_secs(3),
+                    crate::app::state::ToastKind::ConfigWarning => std::time::Duration::from_secs(6),
+                };
+                std::time::Instant::now() + duration
+            }),
             copy_feedback_deadline: None,
             last_api_notification_at: None,
             state,
