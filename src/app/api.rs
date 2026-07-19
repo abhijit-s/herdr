@@ -665,6 +665,7 @@ impl App {
                 ToastKind::NeedsAttention => "needs attention",
                 ToastKind::Finished => "finished",
                 ToastKind::UpdateInstalled => "updated",
+                ToastKind::ConfigWarning => "config warning",
             };
             let workspace_label =
                 ws.display_name_from(&self.state.terminals, &self.terminal_runtimes);
@@ -690,6 +691,7 @@ impl App {
                     ToastKind::NeedsAttention => Duration::from_secs(8),
                     ToastKind::Finished => Duration::from_secs(5),
                     ToastKind::UpdateInstalled => Duration::from_secs(3),
+                    ToastKind::ConfigWarning => Duration::from_secs(6),
                 };
                 Instant::now() + duration
             });

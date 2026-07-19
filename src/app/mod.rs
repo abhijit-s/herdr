@@ -373,6 +373,15 @@ impl App {
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
         let render_dirty = Arc::new(AtomicBool::new(false));
+        let initial_toast = config_diagnostic.as_ref().map(|msg| {
+            crate::app::state::ToastNotification {
+                kind: crate::app::state::ToastKind::ConfigWarning,
+                title: "config.toml".to_string(),
+                context: msg.clone(),
+                position: None,
+                target: None,
+            }
+        });
 
         // Try to restore previous session
         let mut restored_terminals = std::collections::HashMap::new();
@@ -606,7 +615,7 @@ impl App {
             latest_release_notes_available,
             update_dismissed: false,
             config_diagnostic,
-            toast: None,
+            toast: initial_toast,
             pending_agent_notifications: std::collections::HashMap::new(),
             copy_feedback: None,
             outer_terminal_focus: None,
@@ -1348,7 +1357,14 @@ impl App {
                 notify_success,
             ),
             Err(diagnostics) => {
-                self.state.toast = None;
+                self.state.toast = Some(crate::app::state::ToastNotification {
+                    kind: crate::app::state::ToastKind::ConfigWarning,
+                    title: "config.toml".to_string(),
+                    context: crate::config::config_diagnostic_summary(&diagnostics)
+                        .unwrap_or_default(),
+                    position: None,
+                    target: None,
+                });
                 self.state.config_diagnostic =
                     crate::config::config_diagnostic_summary(&diagnostics);
                 self.config_diagnostic_deadline = None;
@@ -1552,17 +1568,17 @@ impl App {
                 });
             }
         } else {
-            self.state.config_diagnostic = crate::config::config_diagnostic_summary(&diagnostics);
+            self.state.config_diagnostic =
+                crate::config::config_diagnostic_summary(&diagnostics);
             self.config_diagnostic_deadline = None;
-            if notify_success {
-                self.state.toast = Some(crate::app::state::ToastNotification {
-                    kind: crate::app::state::ToastKind::UpdateInstalled,
-                    title: "reloaded config".to_string(),
-                    context: "with warnings".to_string(),
-                    position: None,
-                    target: None,
-                });
-            }
+            self.state.toast = Some(crate::app::state::ToastNotification {
+                kind: crate::app::state::ToastKind::ConfigWarning,
+                title: "config.toml".to_string(),
+                context: crate::config::config_diagnostic_summary(&diagnostics)
+                    .unwrap_or_default(),
+                position: None,
+                target: None,
+            });
         }
 
         crate::config::ConfigReloadReport {

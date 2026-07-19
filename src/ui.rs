@@ -57,7 +57,7 @@ pub(crate) use self::scrollbar::{
 use self::settings::render_settings_overlay;
 use self::sidebar::{render_sidebar, render_sidebar_collapsed};
 use self::status::{
-    copy_feedback_rect, render_config_diagnostic, render_copy_feedback, render_toast_notification,
+    copy_feedback_rect, render_copy_feedback, render_toast_notification,
     toast_notification_rect,
 };
 pub(crate) use self::tab_surface::{
@@ -501,14 +501,6 @@ pub fn render_with_runtime_registry(
 
 fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) {
     let has_config_diagnostic = app.config_diagnostic.is_some();
-    if let Some(message) = &app.config_diagnostic {
-        let diagnostic_area = if app.view.layout == ViewLayout::Mobile {
-            terminal_area
-        } else {
-            frame.area()
-        };
-        render_config_diagnostic(frame, diagnostic_area, message, &app.palette);
-    }
     let mut copy_feedback_offset = u16::from(has_config_diagnostic);
     let mut toast_rect = None;
     if let Some(toast) = &app.toast {

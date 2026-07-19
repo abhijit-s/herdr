@@ -1283,6 +1283,7 @@ pub enum ToastKind {
     NeedsAttention,
     Finished,
     UpdateInstalled,
+    ConfigWarning,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

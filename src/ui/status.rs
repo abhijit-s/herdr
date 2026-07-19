@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use super::text::display_width_u16;
-use super::widgets::panel_contrast_fg;
+
 use crate::{
     app::state::{CopyFeedback, Palette, ToastKind, ToastNotification},
     config::{ToastClipboardPosition, ToastHerdrPosition},
@@ -91,6 +91,7 @@ pub(super) fn render_toast_notification(
         ToastKind::NeedsAttention => p.red,
         ToastKind::Finished => p.blue,
         ToastKind::UpdateInstalled => p.accent,
+        ToastKind::ConfigWarning => p.yellow,
     };
     let toast_area = toast_notification_rect(area, toast, offset_for_warning, position);
 
@@ -165,32 +166,6 @@ pub(super) fn render_copy_feedback(
         ),
     ]);
     frame.render_widget(Paragraph::new(text), inner);
-}
-
-pub(super) fn render_config_diagnostic(frame: &mut Frame, area: Rect, message: &str, p: &Palette) {
-    let style = Style::default()
-        .fg(panel_contrast_fg(p))
-        .bg(p.yellow)
-        .add_modifier(Modifier::BOLD);
-
-    for (row, line) in message
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .take(area.height as usize)
-        .enumerate()
-    {
-        let text = format!(" {line} ");
-        let width = (text.len() as u16).min(area.width);
-        let notif_area = Rect::new(
-            area.x + area.width.saturating_sub(width),
-            area.y + row as u16,
-            width,
-            1,
-        );
-
-        frame.render_widget(Clear, notif_area);
-        frame.render_widget(Paragraph::new(Span::styled(text, style)), notif_area);
-    }
 }
 
 pub(super) fn state_dot(state: AgentState, seen: bool, p: &Palette) -> (&'static str, Style) {
