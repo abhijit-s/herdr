@@ -2,7 +2,41 @@
 
 ## Unreleased
 
-## [0.7.4] - 2026-07-15
+## [0.7.5] - 2026-07-19
+
+### Added
+- Added a floating command palette with fuzzy matching, built-in and plugin command discovery, custom command entries, jump navigation, wrap-around cycling, and position counter. Bound to `prefix+shift+space` by default. Configured under `[command_palette]`. (#PR)
+- Added a tmux-style status strip to the tab bar with socket-fed push lanes, `#{slot:NAME}` tokens, `#[style]` directives, theme color resolution, and powerline separator support. (#PR)
+- Added `ui.sidebar_startup_state` to configure whether the sidebar opens collapsed or expanded on launch.
+- Added `ui.sidebar_token_style` for custom sidebar agent token formatting.
+- Added macOS agent environment hints so agents launched from wrapper scripts preserve the correct environment context.
+
+### Fixed
+- Terminal live-follow mode now preserves scroll position through terminal resize events.
+- JavaScript-based integrations now install correctly on Windows.
+- OpenCode lifecycle reports now serialize properly without data loss.
+- Codex working-state detection now recognizes static title spinners.
+- Unknown config keys now produce clear diagnostic messages.
+- Contiguous terminal diff writes are now batched, reducing redraw overhead.
+- Lone escape key input boundaries are now preserved for terminal apps.
+- Pane selection is preserved when `ui.copy_on_select` is disabled. (#1496)
+- Agent wait loops now stop cleanly when the pane closes. (#1488)
+- Tab clicks are no longer swallowed by drag-reorder jitter guard.
+- Plugins are now preserved during live server handoff. (#1453)
+- Pane graphics streams no longer race with disconnect events.
+- CLI requests now guard against client/server protocol mismatches. (#1453)
+- Windows subprocess console flashes are prevented for non-interactive processes.
+- Agent manifest downloads on Windows no longer show hidden curl windows.
+- Worktree toast messages use the high-contrast title row.
+- Worktree dialog errors display as toasts instead of persistent banners.
+
+### Changed
+- Updated vendored `libghostty-vt` with performance and integration improvements.
+- Refreshed vendored `libghostty-vt` at latest upstream revision.
+- The preview release manifest now ships with current agent detection data.
+
+### Upstream Merges
+- All fixes and improvements from upstream ogulcancelik/herdr through late June 2026, including Grok background work detection, Grok terminal signal detection, foreground process group leader cwd tracking, and active tab surface rendering refactors.
 
 ### Added
 - Added session-modal popup floating terminal panes for `type = "popup"` custom command keybindings and plugin panes, with optional cell or percentage sizing and no changes to the tiled tab layout. (#1125)
