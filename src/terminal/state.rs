@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-#[cfg(any(windows, test))]
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 // Effective state arbitration is intentionally centralized here. Full lifecycle
 // Herdr hook integrations are hook-authoritative while live; screen recovery
@@ -44,6 +42,22 @@ enum FullLifecycleHookSuppressionReason {
 struct StaleFullLifecycleHookSession {
     agent_label: String,
     session_ref: crate::agent_resume::AgentSessionRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManagedAgentPhase {
+    Pending {
+        ready_after: Option<Instant>,
+        deadline: Instant,
+    },
+    Active,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ManagedAgent {
+    kind: Agent,
+    observed_expected: bool,
+    phase: ManagedAgentPhase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +103,7 @@ pub struct TerminalState {
     pub terminal_title: Option<String>,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
+    managed_agent: Option<ManagedAgent>,
     hook_report_sequences: HashMap<String, u64>,
     suppressed_full_lifecycle_hook_reports: HashMap<String, SuppressedFullLifecycleHookReport>,
     stale_full_lifecycle_hook_sessions: HashMap<String, Vec<StaleFullLifecycleHookSession>>,
@@ -119,6 +134,7 @@ impl TerminalState {
             terminal_title: None,
             manual_label: None,
             agent_name: None,
+            managed_agent: None,
             hook_report_sequences: HashMap::new(),
             suppressed_full_lifecycle_hook_reports: HashMap::new(),
             stale_full_lifecycle_hook_sessions: HashMap::new(),
@@ -1307,8 +1323,125 @@ impl TerminalState {
         self.agent_name = (!name.is_empty()).then_some(name);
     }
 
+    pub fn begin_managed_agent(
+        &mut self,
+        name: String,
+        kind: Agent,
+        now: Instant,
+        settle_delay: Duration,
+        timeout: Duration,
+    ) {
+        self.set_agent_name(name);
+        self.managed_agent = Some(ManagedAgent {
+            kind,
+            observed_expected: false,
+            phase: ManagedAgentPhase::Pending {
+                ready_after: Some(now.checked_add(settle_delay).unwrap_or(now)),
+                deadline: now.checked_add(timeout).unwrap_or(now),
+            },
+        });
+    }
+
+    pub fn managed_agent_launch_pending(&self) -> bool {
+        self.managed_agent
+            .is_some_and(|managed| matches!(managed.phase, ManagedAgentPhase::Pending { .. }))
+    }
+
+    pub fn managed_agent_interactive_ready(&self) -> bool {
+        self.managed_agent.is_some_and(|managed| {
+            matches!(managed.phase, ManagedAgentPhase::Active)
+                && self.effective_known_agent() == Some(managed.kind)
+                && matches!(self.state, AgentState::Idle | AgentState::Blocked)
+        })
+    }
+
+    pub fn managed_agent_kind(&self) -> Option<Agent> {
+        self.managed_agent.map(|managed| managed.kind)
+    }
+
+    pub fn next_managed_agent_deadline(&self) -> Option<Instant> {
+        let ManagedAgentPhase::Pending {
+            ready_after,
+            deadline,
+        } = self.managed_agent?.phase
+        else {
+            return None;
+        };
+        Some(ready_after.unwrap_or(deadline).min(deadline))
+    }
+
+    pub fn reconcile_managed_agent_at(&mut self, now: Instant, process_exited: bool) -> bool {
+        let Some(managed) = self.managed_agent else {
+            return false;
+        };
+        let known_agent = self.effective_known_agent();
+        let observed_expected = managed.observed_expected || known_agent == Some(managed.kind);
+        let clear = process_exited
+            || known_agent.is_some_and(|agent| agent != managed.kind)
+            || matches!(managed.phase, ManagedAgentPhase::Pending { .. })
+                && observed_expected
+                && known_agent.is_none();
+        if clear {
+            self.managed_agent = None;
+            self.agent_name = None;
+            return true;
+        }
+        if let ManagedAgentPhase::Pending {
+            ready_after,
+            deadline,
+        } = managed.phase
+        {
+            if now >= deadline {
+                self.managed_agent = None;
+                self.agent_name = None;
+                return true;
+            }
+            if ready_after.is_none_or(|ready_after| now >= ready_after) {
+                if known_agent == Some(managed.kind)
+                    && matches!(self.state, AgentState::Idle | AgentState::Blocked)
+                {
+                    self.managed_agent = Some(ManagedAgent {
+                        kind: managed.kind,
+                        observed_expected: true,
+                        phase: ManagedAgentPhase::Active,
+                    });
+                    return true;
+                }
+                if ready_after.is_some() {
+                    self.managed_agent = Some(ManagedAgent {
+                        kind: managed.kind,
+                        observed_expected,
+                        phase: ManagedAgentPhase::Pending {
+                            ready_after: None,
+                            deadline,
+                        },
+                    });
+                    return true;
+                }
+            }
+            if observed_expected != managed.observed_expected {
+                self.managed_agent = Some(ManagedAgent {
+                    observed_expected,
+                    ..managed
+                });
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn restore_managed_agent(&mut self, name: String, kind: Agent) {
+        self.set_agent_name(name);
+        self.managed_agent = Some(ManagedAgent {
+            kind,
+            observed_expected: true,
+            phase: ManagedAgentPhase::Active,
+        });
+    }
+
     pub fn clear_agent_name(&mut self) {
         self.agent_name = None;
+        self.managed_agent = None;
     }
 
     pub fn clear_agent_runtime_identity_after_respawn(&mut self) {
@@ -1411,6 +1544,62 @@ mod tests {
             .join(name)
             .display()
             .to_string()
+    }
+
+    #[test]
+    fn managed_agent_activates_only_after_matching_settled_detection() {
+        let mut terminal = test_terminal();
+        let now = Instant::now();
+        terminal.begin_managed_agent(
+            "reviewer".into(),
+            Agent::Pi,
+            now,
+            Duration::from_millis(100),
+            Duration::from_secs(1),
+        );
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+
+        assert!(terminal.managed_agent_launch_pending());
+        assert!(!terminal.managed_agent_interactive_ready());
+        assert!(terminal.reconcile_managed_agent_at(now + Duration::from_millis(100), false));
+        assert!(!terminal.managed_agent_launch_pending());
+        assert!(terminal.managed_agent_interactive_ready());
+        assert_eq!(terminal.agent_name.as_deref(), Some("reviewer"));
+
+        terminal.set_detected_state(None, AgentState::Unknown);
+        assert!(!terminal.reconcile_managed_agent_at(now + Duration::from_millis(101), false));
+        assert_eq!(terminal.agent_name.as_deref(), Some("reviewer"));
+        assert!(terminal.reconcile_managed_agent_at(now + Duration::from_millis(102), true));
+        assert_eq!(terminal.agent_name, None);
+    }
+
+    #[test]
+    fn managed_agent_mismatch_and_timeout_release_name() {
+        let now = Instant::now();
+        let mut mismatch = test_terminal();
+        mismatch.begin_managed_agent(
+            "reviewer".into(),
+            Agent::Pi,
+            now,
+            Duration::ZERO,
+            Duration::from_secs(1),
+        );
+        mismatch.set_detected_state(Some(Agent::Codex), AgentState::Idle);
+        assert!(mismatch.reconcile_managed_agent_at(now, false));
+        assert_eq!(mismatch.agent_name, None);
+        assert_eq!(mismatch.managed_agent_kind(), None);
+
+        let mut timed_out = test_terminal();
+        timed_out.begin_managed_agent(
+            "reviewer".into(),
+            Agent::Pi,
+            now,
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        );
+        assert!(timed_out.reconcile_managed_agent_at(now + Duration::from_millis(20), false));
+        assert_eq!(timed_out.agent_name, None);
+        assert_eq!(timed_out.managed_agent_kind(), None);
     }
 
     #[test]

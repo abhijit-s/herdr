@@ -36,7 +36,7 @@ socket API 可以:
 - 创建、列出、聚焦、重命名和关闭工作区
 - 创建、列出、聚焦、重命名和关闭标签页
 - 列出、检查、分割、交换、聚焦、调整、重命名、读取、关闭窗格并向其发送输入
-- 通过 CLI 辅助命令列出、检查、读取、发送、重命名、聚焦、启动和附加智能体
+- 通过 CLI 辅助命令列出、检查、读取、提示、等待、重命名、聚焦、启动和附加智能体
 - 从钩子和插件上报自定义智能体状态
 - 订阅事件并等待输出或状态变化
 - 安装和卸载内置集成
@@ -102,7 +102,7 @@ herdr pane read w1:p2 --source recent --lines 50
 | 窗格 | `pane.split`、`pane.swap`、`pane.move`、`pane.zoom`、`pane.layout`、`pane.process_info`、`pane.neighbor`、`pane.edges`、`pane.focus_direction`、`pane.resize`、`pane.list`、`pane.current`、`pane.get`、`pane.rename`、`pane.send_text`、`pane.send_keys`、`pane.send_input`、`pane.read`、`pane.graphics.info`、`pane.graphics.set`、`pane.graphics.clear`、`pane.graphics.stream`、`pane.report_agent`、`pane.report_agent_session`、`pane.report_metadata`、`pane.clear_agent_authority`、`pane.release_agent`、`pane.close`、`pane.wait_for_output` |
 | 弹窗 | `popup.close` |
 | 布局 | `layout.export`、`layout.apply`、`layout.set_split_ratio` |
-| 智能体 | `agent.list`、`agent.get`、`agent.read`、`agent.explain`、`agent.send`、`agent.rename`、`agent.focus`、`agent.start` |
+| 智能体 | `agent.list`、`agent.get`、`agent.read`、`agent.explain`、`agent.send`、`agent.prompt`、`agent.rename`、`agent.focus`、`agent.start` |
 | 事件 | `events.subscribe`、`events.wait` |
 | 集成 | `integration.install`、`integration.uninstall` |
 | 插件 | `plugin.link`、`plugin.list`、`plugin.unlink`、`plugin.enable`、`plugin.disable`、`plugin.action.list`、`plugin.action.invoke`、`plugin.log.list`、`plugin.pane.open`、`plugin.pane.focus`、`plugin.pane.close` |

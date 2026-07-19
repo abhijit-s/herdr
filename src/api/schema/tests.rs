@@ -94,6 +94,41 @@ fn status_set_and_clear_round_trip() {
 }
 
 #[test]
+fn agent_start_and_prompt_requests_round_trip() {
+    let start = Request {
+        id: "start".into(),
+        method: Method::AgentStart(AgentStartParams {
+            name: "reviewer".into(),
+            kind: "pi".into(),
+            pane_id: "w1:p2".into(),
+            args: vec!["--no-session".into()],
+            timeout_ms: Some(30_000),
+        }),
+    };
+    let start_json = serde_json::to_value(&start).unwrap();
+    assert_eq!(start_json["method"], "agent.start");
+    assert_eq!(start_json["params"]["pane_id"], "w1:p2");
+    assert_eq!(
+        serde_json::from_value::<Request>(start_json).unwrap(),
+        start
+    );
+
+    let prompt = Request {
+        id: "prompt".into(),
+        method: Method::AgentPrompt(AgentPromptParams {
+            target: "reviewer".into(),
+            text: "review this".into(),
+        }),
+    };
+    let prompt_json = serde_json::to_value(&prompt).unwrap();
+    assert_eq!(prompt_json["method"], "agent.prompt");
+    assert_eq!(
+        serde_json::from_value::<Request>(prompt_json).unwrap(),
+        prompt
+    );
+}
+
+#[test]
 fn bundled_protocol_schema_refs_resolve_inside_bundle() {
     fn assert_no_standalone_refs(value: &serde_json::Value) {
         match value {

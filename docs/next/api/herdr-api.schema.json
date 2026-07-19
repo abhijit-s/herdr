@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 16,
+  "protocol": 17,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -1176,6 +1176,21 @@
     },
     "request": {
       "$defs": {
+        "AgentPromptParams": {
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "text"
+          ],
+          "type": "object"
+        },
         "AgentReadParams": {
           "properties": {
             "format": {
@@ -1241,57 +1256,35 @@
         },
         "AgentStartParams": {
           "properties": {
-            "argv": {
+            "args": {
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
-            "cwd": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "env": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "focus": {
-              "default": false,
-              "type": "boolean"
+            "kind": {
+              "type": "string"
             },
             "name": {
               "type": "string"
             },
-            "split": {
-              "anyOf": [
-                {
-                  "$ref": "#/schemas/request/$defs/SplitDirection"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "pane_id": {
+              "type": "string"
             },
-            "tab_id": {
+            "timeout_ms": {
+              "description": "Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.",
+              "format": "uint64",
+              "minimum": 0,
               "type": [
-                "string",
-                "null"
-              ]
-            },
-            "workspace_id": {
-              "type": [
-                "string",
+                "integer",
                 "null"
               ]
             }
           },
           "required": [
             "name",
-            "argv"
+            "kind",
+            "pane_id"
           ],
           "type": "object"
         },
@@ -4646,6 +4639,22 @@
         {
           "properties": {
             "method": {
+              "const": "agent.prompt",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentPromptParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "pane.split",
               "type": "string"
             },
@@ -5680,6 +5689,12 @@
                 "null"
               ]
             },
+            "interactive_ready": {
+              "type": "boolean"
+            },
+            "launch_pending": {
+              "type": "boolean"
+            },
             "name": {
               "type": [
                 "string",
@@ -5696,6 +5711,12 @@
             },
             "screen_detection_skipped": {
               "type": "boolean"
+            },
+            "state_change_seq": {
+              "default": 0,
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
             },
             "state_labels": {
               "additionalProperties": {
@@ -8367,6 +8388,28 @@
                 "type",
                 "agent",
                 "argv"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agent": {
+                  "$ref": "#/schemas/success_response/$defs/AgentInfo"
+                },
+                "baseline_state_change_seq": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "agent_prompted",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "agent",
+                "baseline_state_change_seq"
               ],
               "type": "object"
             },

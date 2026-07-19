@@ -1,6 +1,8 @@
 //! Pure state mutations on AppState.
 //! These don't need channels, async, or PTY runtime.
 
+use std::time::Instant;
+
 use tracing::{info, warn};
 
 use crate::detect::{Agent, AgentState};
@@ -11,7 +13,6 @@ use crate::layout::{find_in_direction, NavDirection};
 use crate::selection::Selection;
 use crate::terminal::{EffectiveStateChange, TerminalStateMutation};
 use crate::workspace::WorkspaceGitStatus;
-use unicode_width::UnicodeWidthChar;
 
 use super::state::{
     text_matches_query, AgentNotificationDelivery, AppState, Mode, NavigatorRow,
@@ -2234,7 +2235,7 @@ pub(crate) fn visible_text_cells(text: &str, pane_width: u16) -> Vec<VisibleText
             pending_wrap = false;
         }
 
-        let width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+        let width = u16::from(crate::ghostty::unicode_codepoint_width(ch as u32));
         cells.push(VisibleTextCell {
             byte_index,
             ch,
@@ -2266,7 +2267,7 @@ pub(crate) fn logical_cell_for_visible_cell(
     visible_text_cells(text, pane_width)
         .into_iter()
         .find(|cell| {
-            let width = UnicodeWidthChar::width(cell.ch).unwrap_or(0) as u16;
+            let width = u16::from(crate::ghostty::unicode_codepoint_width(cell.ch as u32));
             cell.screen_row == target_row
                 && if width == 0 {
                     target_col == cell.screen_col
@@ -2299,7 +2300,7 @@ fn text_cells(row: &str) -> Vec<TextCell> {
     let mut next_col = 0u16;
     row.chars()
         .map(|ch| {
-            let width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+            let width = u16::from(crate::ghostty::unicode_codepoint_width(ch as u32));
             let start_col = if width == 0 {
                 next_col.saturating_sub(1)
             } else {
@@ -2598,7 +2599,7 @@ impl AppState {
                 observed_at,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
-                    Some(terminal.set_detected_state_with_screen_signals_at(
+                    let mutation = terminal.set_detected_state_with_screen_signals_at(
                         agent,
                         state,
                         visible_blocker,
@@ -2606,7 +2607,11 @@ impl AppState {
                         visible_working,
                         process_exited,
                         observed_at,
-                    ))
+                    );
+                    if process_exited {
+                        terminal.reconcile_managed_agent_at(observed_at, true);
+                    }
+                    Some(mutation)
                 })
                 .into_iter()
                 .collect(),
@@ -2769,11 +2774,13 @@ impl AppState {
             .attached_terminal_id
             .clone();
         let previous_seen = self.workspaces[ws_idx].pane_state(pane_id)?.seen;
-        let mutation = {
+        let (mutation, managed_changed) = {
             let terminal = self.terminals.get_mut(&terminal_id)?;
-            update(terminal)?
+            let mutation = update(terminal)?;
+            let managed_changed = terminal.reconcile_managed_agent_at(Instant::now(), false);
+            (mutation, managed_changed)
         };
-        if mutation.session_ref_changed {
+        if mutation.session_ref_changed || managed_changed {
             self.mark_session_dirty();
         }
         let change = mutation.effective_state_change?;
@@ -2799,6 +2806,40 @@ impl AppState {
             presentation: change.presentation.clone(),
         };
         Some(update)
+    }
+
+    pub(crate) fn next_managed_agent_deadline(&self) -> Option<Instant> {
+        self.terminals
+            .values()
+            .filter_map(crate::terminal::TerminalState::next_managed_agent_deadline)
+            .min()
+    }
+
+    pub(crate) fn reconcile_managed_agents_at(&mut self, now: Instant) -> Vec<(usize, PaneId)> {
+        let mut changed_terminals = std::collections::HashSet::new();
+        for (terminal_id, terminal) in &mut self.terminals {
+            if terminal.reconcile_managed_agent_at(now, false) {
+                changed_terminals.insert(terminal_id.clone());
+            }
+        }
+        if changed_terminals.is_empty() {
+            return Vec::new();
+        }
+        self.mark_session_dirty();
+        self.workspaces
+            .iter()
+            .enumerate()
+            .flat_map(|(ws_idx, workspace)| {
+                let changed_terminals = &changed_terminals;
+                workspace.tabs.iter().flat_map(move |tab| {
+                    tab.panes.iter().filter_map(move |(&pane_id, pane)| {
+                        changed_terminals
+                            .contains(&pane.attached_terminal_id)
+                            .then_some((ws_idx, pane_id))
+                    })
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn publish_pane_process_exit_if_agent(
@@ -3219,7 +3260,7 @@ mod tests {
         let prefix = &row[..byte_idx];
         prefix
             .chars()
-            .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0) as u16)
+            .map(|ch| u16::from(crate::ghostty::unicode_codepoint_width(ch as u32)))
             .sum()
     }
 

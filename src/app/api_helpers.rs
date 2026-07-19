@@ -48,6 +48,35 @@ pub(super) fn encode_api_keys(
     Ok(encoded_keys)
 }
 
+pub(super) fn encode_api_submission(
+    runtime: &crate::terminal::TerminalRuntime,
+    text: &str,
+) -> Vec<u8> {
+    let mut bytes = encode_api_text(runtime, text);
+    let enter = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    bytes.extend_from_slice(&runtime.encode_terminal_key(enter.into()));
+    bytes
+}
+
+pub(super) fn encode_api_input(
+    runtime: &crate::terminal::TerminalRuntime,
+    text: &str,
+    keys: &[String],
+) -> Result<Vec<u8>, String> {
+    let mut bytes = if text.is_empty() {
+        Vec::new()
+    } else {
+        encode_api_text(runtime, text)
+    };
+    for encoded in encode_api_keys(runtime, keys)? {
+        bytes.extend_from_slice(&encoded);
+    }
+    Ok(bytes)
+}
+
 pub(super) fn detect_state_from_api(
     state: crate::api::schema::PaneAgentState,
 ) -> crate::detect::AgentState {

@@ -133,21 +133,35 @@ herdr pane report-metadata w1:p1 \
 
 ## 从 CLI 启动智能体
 
-当你希望一个终端被当作智能体目标时,使用 `herdr agent ...` 命令。智能体目标会出现在 `agent list` 中,可以按智能体名称读取或发送输入,可以按智能体状态等待,也可以被直接附加。
-
-从脚本向 Herdr 中启动一个智能体:
+先用工作区、标签页、窗格和布局命令创建拓扑,再把一个现有 shell 窗格启动为具有唯一名称的受支持交互式智能体:
 
 ```bash
-herdr agent start reviewer --cwd ~/project --split right -- pi
+herdr pane split --current --direction right --no-focus
+herdr agent start reviewer --kind pi --pane w1:p2
 ```
 
-也可以把该智能体放进特定的工作区或标签页:
+`agent start` 不会创建或拆分拓扑。Herdr 为请求的 kind 选择标准可执行文件,用唯一名称标记目标窗格,并等待交互式智能体被检测为 idle、done 或 blocked。原生参数可以放在 `--` 之后:
 
 ```bash
-herdr agent start docs --workspace w1 --tab w1:t1 -- claude
+herdr agent start reviewer --kind pi --pane w1:p2 -- --name scratch --no-session
 ```
 
-普通终端、服务器、测试、shell 和底层终端输入请使用 `herdr pane ...` 命令。例如跑 `cargo test` 用 `pane split` 和 `pane run`,而不是 `agent start`,除非那个终端就是有意要当作智能体目标。
+按名称提交提示。`--wait` 会把等待绑定到该提示,并在智能体完成或变为 blocked 时返回:
+
+```bash
+herdr agent prompt reviewer "Review the current diff" --wait --timeout 120000
+```
+
+`agent prompt` 会在发送 Enter 前遵循终端当前的 bracketed paste 模式,因此 `A != B` 之类的文本不会触发智能体的输入模式快捷键。提交提示时请使用它;`agent send` 仍是底层的字面文本操作,不会提交一轮对话。
+
+对于已经处于 working 的智能体,`agent wait` 会在状态变为 idle、done 或 blocked 时返回;如果当前已经是这些状态之一,则立即返回。
+
+```bash
+herdr agent wait reviewer --timeout 120000
+herdr agent read reviewer --source recent-unwrapped --lines 120
+```
+
+普通终端、服务器、测试、shell、拓扑和底层终端输入请使用 `herdr pane ...` 命令。
 
 ## 直接附加到智能体
 

@@ -304,7 +304,7 @@ fn ping_over_socket_returns_version() {
     assert_eq!(value["result"]["version"], env!("CARGO_PKG_VERSION"));
     // Intentionally hardcoded so wire protocol bumps require updating this test.
     // Changing this value means old clients/servers are no longer compatible.
-    assert_eq!(value["result"]["protocol"], 16);
+    assert_eq!(value["result"]["protocol"], 17);
 
     cleanup_spawned_herdr(child, base);
 }
@@ -1035,50 +1035,76 @@ fn new_terminal_cwd_follow_ignores_nonleader_group_member_cwd() {
 
 #[cfg(not(target_os = "macos"))]
 #[test]
-fn agent_start_creates_named_terminal_over_socket() {
+fn agent_start_targets_existing_pane_over_socket() {
+    use std::os::unix::fs::PermissionsExt;
+
     let _lock = test_lock();
     let base = unique_test_dir();
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
+    let bin = base.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let fake_pi = bin.join("pi");
+    fs::write(&fake_pi, "#!/bin/sh\nHERDR_AGENT=pi exec /bin/sleep 20\n").unwrap();
+    fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let child = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let child = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
     wait_for_socket(&socket_path, Duration::from_secs(5));
-
-    let started = send_request(
+    let workspace = send_request(
         &socket_path,
-        &format!(
-            r#"{{"id":"agent_start","method":"agent.start","params":{{"name":"main","cwd":"{}","argv":["/bin/sh","-c","printf agent-start-ok; sleep 2"]}}}}"#,
-            base.display()
-        ),
+        &serde_json::json!({
+            "id": "agent_workspace",
+            "method": "workspace.create",
+            "params": { "cwd": base.display().to_string(), "focus": false }
+        })
+        .to_string(),
     );
-    assert_eq!(started["result"]["type"], "agent_started");
-    assert_eq!(started["result"]["agent"]["name"], "main");
-    assert_eq!(
-        started["result"]["agent"]["cwd"],
-        base.display().to_string()
-    );
-    assert_eq!(started["result"]["argv"][0], "/bin/sh");
-    let terminal_id = started["result"]["agent"]["terminal_id"]
+    let pane_id = workspace["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let terminal_id = workspace["result"]["root_pane"]["terminal_id"]
         .as_str()
         .unwrap()
         .to_string();
 
-    let listed = send_request(
+    let started = send_request(
         &socket_path,
-        r#"{"id":"agent_start_list","method":"agent.list","params":{}}"#,
+        &serde_json::json!({
+            "id": "agent_start",
+            "method": "agent.start",
+            "params": {
+                "name": "main",
+                "kind": "pi",
+                "pane_id": pane_id,
+                "args": ["--no-session"],
+                "timeout_ms": 8_000
+            }
+        })
+        .to_string(),
     );
-    let agents = listed["result"]["agents"].as_array().unwrap();
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0]["terminal_id"], terminal_id);
-    assert_eq!(agents[0]["name"], "main");
+    assert_eq!(started["result"]["type"], "agent_started");
+    assert_eq!(started["result"]["agent"]["name"], "main");
+    assert_eq!(started["result"]["agent"]["pane_id"], pane_id);
+    assert_eq!(started["result"]["agent"]["terminal_id"], terminal_id);
+    assert_eq!(
+        started["result"]["argv"],
+        serde_json::json!(["pi", "--no-session"])
+    );
 
     let duplicate = send_request(
         &socket_path,
-        &format!(
-            r#"{{"id":"agent_start_duplicate","method":"agent.start","params":{{"name":"main","cwd":"{}","argv":["/bin/sh","-c","true"]}}}}"#,
-            base.display()
-        ),
+        &serde_json::json!({
+            "id": "agent_start_duplicate",
+            "method": "agent.start",
+            "params": {
+                "name": "main",
+                "kind": "pi",
+                "pane_id": pane_id
+            }
+        })
+        .to_string(),
     );
     assert_eq!(duplicate["error"]["code"], "agent_name_taken");
     assert!(duplicate["error"]["message"]

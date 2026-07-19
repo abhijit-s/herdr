@@ -133,21 +133,35 @@ herdr pane report-metadata w1:p1 \
 
 ## CLI からエージェントを起動する
 
-ターミナルをエージェントターゲットとして扱いたいときは `herdr agent ...` コマンドを使います。エージェントターゲットは `agent list` に表示され、エージェント名で読み取りや入力送信ができ、エージェント状態で wait でき、直接アタッチできます。
-
-スクリプトから Herdr にエージェントを起動します:
+まずワークスペース、タブ、ペイン、レイアウトの各コマンドでトポロジーを作成します。次に、既存のシェルペインを一意な名前を持つ対応済み対話型エージェントとして起動します:
 
 ```bash
-herdr agent start reviewer --cwd ~/project --split right -- pi
+herdr pane split --current --direction right --no-focus
+herdr agent start reviewer --kind pi --pane w1:p2
 ```
 
-特定のワークスペースやタブに配置することもできます:
+`agent start` はトポロジーを作成も分割もしません。要求された kind に対応する標準実行ファイルを Herdr が選び、対象ペインに一意な名前を付け、対話型エージェントが idle、done、または blocked として検出されるまで待ちます。ネイティブ引数は `--` の後に指定できます:
 
 ```bash
-herdr agent start docs --workspace w1 --tab w1:t1 -- claude
+herdr agent start reviewer --kind pi --pane w1:p2 -- --name scratch --no-session
 ```
 
-通常のターミナル、サーバー、テスト、シェル、低レベルなターミナル入力には `herdr pane ...` コマンドを使ってください。たとえば `cargo test` には `agent start` ではなく `pane split` と `pane run` を使います。そのターミナルを意図的にエージェントターゲットとして扱うのでない限り。
+名前でプロンプトを送信します。`--wait` はそのプロンプトに待機を結び付け、エージェントが完了または blocked になると返ります:
+
+```bash
+herdr agent prompt reviewer "Review the current diff" --wait --timeout 120000
+```
+
+`agent prompt` は Enter を送る前にターミナルの現在の bracketed paste モードを尊重するため、`A != B` のようなテキストも入力モードのキーバインドを発火させずにエージェントへ届きます。送信にはこれを使ってください。`agent send` は低レベルのリテラルテキスト操作のままで、ターンを送信しません。
+
+すでに working のエージェントには `agent wait` を使います。状態が idle、done、または blocked になると返り、すでにその状態なら即座に返ります。
+
+```bash
+herdr agent wait reviewer --timeout 120000
+herdr agent read reviewer --source recent-unwrapped --lines 120
+```
+
+通常のターミナル、サーバー、テスト、シェル、トポロジー、低レベルなターミナル入力には `herdr pane ...` コマンドを使ってください。
 
 ## エージェントに直接アタッチする
 

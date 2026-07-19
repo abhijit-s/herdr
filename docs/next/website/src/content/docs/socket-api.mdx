@@ -40,7 +40,7 @@ The socket API can:
 - create, list, focus, rename, and close workspaces
 - create, list, focus, rename, and close tabs
 - list, inspect, split, swap, focus, resize, rename, read, close, and send input to panes
-- list, inspect, read, send to, rename, focus, start, and attach agents through CLI helpers
+- list, inspect, read, prompt, wait on, rename, focus, start, and attach agents through CLI helpers
 - report custom agent state from hooks and plugins
 - subscribe to events and wait for output or state changes
 - install and uninstall built-in integrations
@@ -106,7 +106,7 @@ Raw socket method names use dot notation:
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.graphics.info`, `pane.graphics.set`, `pane.graphics.clear`, `pane.graphics.stream`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
-| Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send`, `agent.rename`, `agent.focus`, `agent.start` |
+| Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send`, `agent.prompt`, `agent.rename`, `agent.focus`, `agent.start` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |

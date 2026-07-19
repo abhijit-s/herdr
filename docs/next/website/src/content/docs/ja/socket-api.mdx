@@ -36,7 +36,7 @@ herdr api schema --output herdr-api.schema.json
 - ワークスペースの作成、一覧、フォーカス、名前変更、クローズ
 - タブの作成、一覧、フォーカス、名前変更、クローズ
 - ペインの一覧、調査、分割、入れ替え、フォーカス、リサイズ、名前変更、読み取り、クローズ、入力送信
-- CLI ヘルパーを通じたエージェントの一覧、調査、読み取り、送信、名前変更、フォーカス、起動、アタッチ
+- CLI ヘルパーを通じたエージェントの一覧、調査、読み取り、プロンプト、待機、名前変更、フォーカス、起動、アタッチ
 - フックやプラグインからのカスタムエージェント状態の報告
 - イベントの購読と、出力や状態変化の待機
 - 組み込みインテグレーションのインストールとアンインストール
@@ -102,7 +102,7 @@ herdr pane read w1:p2 --source recent --lines 50
 | ペイン | `pane.split`、`pane.swap`、`pane.move`、`pane.zoom`、`pane.layout`、`pane.process_info`、`pane.neighbor`、`pane.edges`、`pane.focus_direction`、`pane.resize`、`pane.list`、`pane.current`、`pane.get`、`pane.rename`、`pane.send_text`、`pane.send_keys`、`pane.send_input`、`pane.read`、`pane.graphics.info`、`pane.graphics.set`、`pane.graphics.clear`、`pane.graphics.stream`、`pane.report_agent`、`pane.report_agent_session`、`pane.report_metadata`、`pane.clear_agent_authority`、`pane.release_agent`、`pane.close`、`pane.wait_for_output` |
 | ポップアップ | `popup.close` |
 | レイアウト | `layout.export`、`layout.apply`、`layout.set_split_ratio` |
-| エージェント | `agent.list`、`agent.get`、`agent.read`、`agent.explain`、`agent.send`、`agent.rename`、`agent.focus`、`agent.start` |
+| エージェント | `agent.list`、`agent.get`、`agent.read`、`agent.explain`、`agent.send`、`agent.prompt`、`agent.rename`、`agent.focus`、`agent.start` |
 | イベント | `events.subscribe`、`events.wait` |
 | インテグレーション | `integration.install`、`integration.uninstall` |
 | プラグイン | `plugin.link`、`plugin.list`、`plugin.unlink`、`plugin.enable`、`plugin.disable`、`plugin.action.list`、`plugin.action.invoke`、`plugin.log.list`、`plugin.pane.open`、`plugin.pane.focus`、`plugin.pane.close` |

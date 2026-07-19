@@ -133,21 +133,35 @@ Agent sidebar rows can also opt into `terminal_title` or `terminal_title_strippe
 
 ## Start agents from the CLI
 
-Use `herdr agent ...` commands when you want a terminal to be treated as an agent target. Agent targets show up in `agent list`, can be read or sent input by agent name, can be waited on by agent state, and can be directly attached.
-
-Spawn an agent into Herdr from a script:
+Use workspace, tab, pane, and layout commands to create topology first. Then activate an existing shell pane as a supported interactive agent with a unique name:
 
 ```bash
-herdr agent start reviewer --cwd ~/project --split right -- pi
+herdr pane split --current --direction right --no-focus
+herdr agent start reviewer --kind pi --pane w1:p2
 ```
 
-You can place that agent in a specific workspace or tab:
+`agent start` never creates or splits topology. Herdr chooses the canonical executable for the requested kind, labels the target pane with the unique name, and returns after the expected interactive agent is detected as idle, done, or blocked. Optional native arguments follow `--`:
 
 ```bash
-herdr agent start docs --workspace w1 --tab w1:t1 -- claude
+herdr agent start reviewer --kind pi --pane w1:p2 -- --name scratch --no-session
 ```
 
-Use `herdr pane ...` commands for ordinary terminals, servers, tests, shells, and low-level terminal input. For example, use `pane split` and `pane run` for `cargo test`, not `agent start`, unless that terminal is intentionally being treated as an agent target.
+Submit a prompt by name. `--wait` binds the wait to that prompt and returns when the agent finishes or becomes blocked:
+
+```bash
+herdr agent prompt reviewer "Review the current diff" --wait --timeout 120000
+```
+
+`agent prompt` honors the terminal's live bracketed-paste mode before sending Enter, so text such as `A != B` reaches agents without triggering input-mode keybindings. Use it for submissions; `agent send` remains a low-level literal-text operation and does not submit a turn.
+
+For an agent that is already working, `agent wait` returns when its status becomes idle, done, or blocked. It returns immediately if one of those statuses is already current.
+
+```bash
+herdr agent wait reviewer --timeout 120000
+herdr agent read reviewer --source recent-unwrapped --lines 120
+```
+
+Use `herdr pane ...` commands for ordinary terminals, servers, tests, shells, topology, and low-level terminal input.
 
 ## Attach directly to an agent
 

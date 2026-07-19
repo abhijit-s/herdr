@@ -205,7 +205,7 @@ and `shift+tab`, function keys such as `f1`, and named punctuation such as
 `minus`, `plus`, and `backtick`. Legacy `C-c` and `c-c` are accepted as
 aliases for `ctrl+c`.
 
-`pane run` submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands.
+`pane run` honors live bracketed-paste mode and submits text plus Enter atomically. Prefer it over `send-text` plus `send-keys Enter` for commands; the separate send operations remain low-level and non-submitting.
 
 Report agent state from custom hooks:
 
@@ -258,18 +258,21 @@ herdr agent list
 herdr agent get <target>
 herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]
 herdr agent send <target> <text>
+herdr agent prompt <name> <text> [--wait] [--timeout MS]
 herdr agent rename <target> <name>|--clear
 herdr agent focus <target>
-herdr agent wait <target> --status <idle|working|blocked|unknown> [--timeout MS]
+herdr agent wait <name> [--timeout MS]
 herdr agent attach <target> [--takeover]
-herdr agent start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [--env KEY=VALUE] [--focus|--no-focus] -- <argv...>
+herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
 
 Agent targets can be terminal IDs, unique agent names, detected or reported agent labels, or legacy pane IDs. Names and labels are agent identities. Terminal IDs and legacy pane IDs are low-level escape hatches.
 
-`agent read` reads the resolved terminal stream. `agent send` writes literal text to that stream. `agent get`, `agent focus`, `agent wait`, and `agent attach` require the resolved terminal to have agent identity. `agent rename` can assign that identity.
+`agent start` activates an existing available shell pane; topology must be created separately. The kind selects Herdr's canonical interactive executable, while arguments after `--` are passed to that executable. `agent prompt` requires a unique active agent name, honors live bracketed-paste mode, and submits text plus Enter atomically. With `--wait`, it waits for a causally later idle, done, or blocked state. Standalone `agent wait` returns immediately for idle, done, or blocked and otherwise waits while the agent is working.
+
+`agent read` reads the resolved terminal stream. `agent send` writes literal text without submitting a turn; use `agent prompt` when the text must be protected from input-mode keybindings and followed by Enter. `agent get`, `agent focus`, and `agent attach` accept the broader agent target forms. `agent rename` can assign an identity to an automatically detected agent.
 
 `agent explain` asks the running server to classify the same bottom-buffer detection snapshot used by screen detection, so live output reflects the server's active manifest cache. Because this uses the `agent.explain` socket method, restart or hand off to an updated server after upgrading Herdr before using live explain. Use `--file PATH --agent LABEL` to explain a saved fixture locally instead. The default output shows the agent, final state, manifest source and version, matched rule with its region evidence, and any fallback, skip, or warning reasons. Add `--verbose` for visible evidence flags, cached remote version, local override shadowing, remote update status, and the full evaluated-rules list with matcher and region evidence. Add `--json` for issue reports or tests.
 

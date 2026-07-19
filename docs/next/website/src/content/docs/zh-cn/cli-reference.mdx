@@ -191,7 +191,7 @@ herdr pane run <pane_id> <command>
 
 `<key>` 使用 Herdr 的组合键语法: `a` 这类普通可打印键,`enter`、`tab`、`esc`、`backspace`、`left`、`right`、`up`、`down` 这类特殊键,`ctrl+h`、`control+j`、`alt+x`、`shift+tab` 这类修饰组合键,`f1` 这类功能键,以及 `minus`、`plus`、`backtick` 这类命名标点。旧式的 `C-c` 和 `c-c` 作为 `ctrl+c` 的别名被接受。
 
-`pane run` 把文本和回车作为一个原子操作提交。发送命令时优先用它,而不是 `send-text` 加 `send-keys Enter`。
+`pane run` 会遵循当前的 bracketed paste 模式,并把文本和 Enter 作为一个原子操作提交。发送命令时优先用它,而不是 `send-text` 加 `send-keys Enter`;单独的发送操作仍是底层操作,不会提交命令。
 
 从自定义钩子上报智能体状态:
 
@@ -242,18 +242,21 @@ herdr agent list
 herdr agent get <target>
 herdr agent read <target> [--source visible|recent|recent-unwrapped|detection] [--lines N] [--format text|ansi] [--ansi]
 herdr agent send <target> <text>
+herdr agent prompt <name> <text> [--wait] [--timeout MS]
 herdr agent rename <target> <name>|--clear
 herdr agent focus <target>
-herdr agent wait <target> --status <idle|working|blocked|unknown> [--timeout MS]
+herdr agent wait <name> [--timeout MS]
 herdr agent attach <target> [--takeover]
-herdr agent start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [--env KEY=VALUE] [--focus|--no-focus] -- <argv...>
+herdr agent start <name> --kind KIND --pane ID [--timeout MS] [-- <agent-args...>]
 herdr agent explain <target> [--json|--verbose]
 herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 ```
 
 智能体目标可以是终端 ID、唯一的智能体名称、检测到或上报的智能体标签,以及旧式窗格 ID。名称和标签是智能体的身份。终端 ID 和旧式窗格 ID 是底层的逃生舱。
 
-`agent read` 读取解析出的终端流。`agent send` 向该流写入字面文本。`agent get`、`agent focus`、`agent wait` 和 `agent attach` 要求解析出的终端具有智能体身份。`agent rename` 可以赋予这个身份。
+`agent start` 会在现有可用 shell 窗格中启动智能体;拓扑必须单独创建。kind 选择 Herdr 的标准交互式可执行文件,`--` 之后的参数会传给该程序。`agent prompt` 要求唯一的活动智能体名称,遵循当前的 bracketed paste 模式,并原子地提交文本和 Enter。加上 `--wait` 后,它会等待该提交之后的 idle、done 或 blocked 状态。单独的 `agent wait` 在当前为 idle、done 或 blocked 时立即返回,否则只在智能体处于 working 时等待。
+
+`agent read` 读取解析出的终端流。`agent send` 只写入字面文本,不会提交一轮对话;需要保护文本不触发输入模式快捷键并发送 Enter 时,请使用 `agent prompt`。`agent get`、`agent focus` 和 `agent attach` 接受更广泛的目标形式。`agent rename` 可以为自动检测到的智能体分配名称。
 
 `agent explain` 请求运行中的服务器对屏幕检测所用的同一份底部缓冲区检测快照进行分类,因此实时输出反映服务器生效的清单缓存。因为它使用 `agent.explain` socket 方法,升级 Herdr 后,请先重启或交接到更新后的服务器,再使用实时 explain。用 `--file PATH --agent LABEL` 可以改为在本地解释一份保存的样本。默认输出显示智能体、最终状态、清单来源和版本、匹配的规则及其区域证据,以及任何回退、跳过或警告原因。加 `--verbose` 可以看到可见证据标志、缓存的远程版本、本地覆盖的遮蔽情况、远程更新状态,以及带匹配器和区域证据的完整已评估规则列表。提交问题报告或写测试时加 `--json`。
 
