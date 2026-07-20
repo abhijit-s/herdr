@@ -16,7 +16,7 @@ fn agent_start_command_works() {
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexport HERDR_AGENT=pi\n'{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r prompt; do\n  [ \"$prompt\" = \"do not transition\" ] && continue\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state working >/dev/null\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n  printf '%s\\n' \"$prompt\" >> '{}'\ndone\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexport HERDR_AGENT=pi\n'{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r prompt; do\n  case \"$prompt\" in \"do not transition\"|\"stall\") continue ;; esac\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state working >/dev/null\n  '{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n  printf '%s\\n' \"$prompt\" >> '{}'\ndone\n",
             captured_args.display(),
             env!("CARGO_BIN_EXE_herdr"),
             env!("CARGO_BIN_EXE_herdr"),
@@ -163,6 +163,25 @@ fn agent_start_command_works() {
     assert_eq!(stale_idle.status.code(), Some(1));
     let stale_idle: serde_json::Value = serde_json::from_slice(&stale_idle.stderr).unwrap();
     assert_eq!(stale_idle["error"]["code"], "timeout");
+
+    let stalled = run_cli(
+        &socket_path,
+        &[
+            "agent",
+            "prompt",
+            "main",
+            "stall",
+            "--wait",
+            "--timeout",
+            "6000",
+        ],
+    );
+    assert_eq!(stalled.status.code(), Some(1));
+    let stalled: serde_json::Value = serde_json::from_slice(&stalled.stderr).unwrap();
+    assert_eq!(stalled["error"]["code"], "agent_prompt_stalled");
+    assert!(stalled["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("state_change_seq remained")));
 
     let prompted = run_cli(
         &socket_path,
