@@ -6,6 +6,7 @@
 
 pub(crate) mod actions;
 mod agent_resume;
+pub(crate) mod agent_view;
 mod agents;
 mod api;
 mod api_helpers;
@@ -373,15 +374,16 @@ impl App {
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
         let render_dirty = Arc::new(AtomicBool::new(false));
-        let initial_toast = config_diagnostic.as_ref().map(|msg| {
-            crate::app::state::ToastNotification {
-                kind: crate::app::state::ToastKind::ConfigWarning,
-                title: "config.toml".to_string(),
-                context: msg.clone(),
-                position: None,
-                target: None,
-            }
-        });
+        let initial_toast =
+            config_diagnostic
+                .as_ref()
+                .map(|msg| crate::app::state::ToastNotification {
+                    kind: crate::app::state::ToastKind::ConfigWarning,
+                    title: "config.toml".to_string(),
+                    context: msg.clone(),
+                    position: None,
+                    target: None,
+                });
 
         // Try to restore previous session
         let mut restored_terminals = std::collections::HashMap::new();
@@ -632,6 +634,7 @@ impl App {
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
             sidebar_section_split,
             agent_panel_sort,
+            agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             next_agent_state_change_seq: 0,
@@ -738,10 +741,16 @@ impl App {
             config_diagnostic_deadline: None,
             toast_deadline: initial_toast.as_ref().map(|toast| {
                 let duration = match toast.kind {
-                    crate::app::state::ToastKind::NeedsAttention => std::time::Duration::from_secs(8),
+                    crate::app::state::ToastKind::NeedsAttention => {
+                        std::time::Duration::from_secs(8)
+                    }
                     crate::app::state::ToastKind::Finished => std::time::Duration::from_secs(5),
-                    crate::app::state::ToastKind::UpdateInstalled => std::time::Duration::from_secs(3),
-                    crate::app::state::ToastKind::ConfigWarning => std::time::Duration::from_secs(6),
+                    crate::app::state::ToastKind::UpdateInstalled => {
+                        std::time::Duration::from_secs(3)
+                    }
+                    crate::app::state::ToastKind::ConfigWarning => {
+                        std::time::Duration::from_secs(6)
+                    }
                 };
                 std::time::Instant::now() + duration
             }),
@@ -1576,14 +1585,12 @@ impl App {
                 });
             }
         } else {
-            self.state.config_diagnostic =
-                crate::config::config_diagnostic_summary(&diagnostics);
+            self.state.config_diagnostic = crate::config::config_diagnostic_summary(&diagnostics);
             self.config_diagnostic_deadline = None;
             self.state.toast = Some(crate::app::state::ToastNotification {
                 kind: crate::app::state::ToastKind::ConfigWarning,
                 title: "config.toml".to_string(),
-                context: crate::config::config_diagnostic_summary(&diagnostics)
-                    .unwrap_or_default(),
+                context: crate::config::config_diagnostic_summary(&diagnostics).unwrap_or_default(),
                 position: None,
                 target: None,
             });
@@ -3317,7 +3324,9 @@ mod tests {
             .is_some_and(|message| {
                 message == "config.toml invalid; keeping current config; herdr config check"
             }));
-        assert!(app.state.toast.is_none());
+        assert!(app.state.toast.as_ref().is_some_and(|toast| toast.kind
+            == crate::app::state::ToastKind::ConfigWarning
+            && toast.title == "config.toml"));
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -3662,6 +3671,12 @@ mod tests {
                 amount: Some(0.05),
             }),
         };
+        let agent_view = crate::api::schema::Request {
+            id: "req_9".into(),
+            method: crate::api::schema::Method::AgentViewClear(
+                crate::api::schema::AgentViewClearParams::default(),
+            ),
+        };
 
         assert!(!crate::api::request_changes_ui(&read_only));
         assert!(!crate::api::request_changes_ui(&worktree_list));
@@ -3671,6 +3686,7 @@ mod tests {
         assert!(crate::api::request_changes_ui(&pane_swap));
         assert!(crate::api::request_changes_ui(&pane_focus_direction));
         assert!(crate::api::request_changes_ui(&pane_resize));
+        assert!(crate::api::request_changes_ui(&agent_view));
     }
 
     #[test]
@@ -3900,7 +3916,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_target_resolves_terminal_id() {
+    fn terminal_and_agent_targets_treat_terminal_ids_differently() {
         let mut app = test_app();
         let workspace = Workspace::test_new("terminal-target-id");
         let pane = workspace.tabs[0].root_pane;
@@ -3910,19 +3926,54 @@ mod tests {
         app.state.selected = 0;
 
         let resolved = app.resolve_terminal_target(&terminal_id).unwrap();
-
-        assert_eq!(resolved.ws_idx, 0);
         assert_eq!(resolved.pane_id, pane);
         assert_eq!(resolved.terminal_id, terminal_id);
+
+        assert!(matches!(
+            app.resolve_agent_target(&resolved.terminal_id),
+            Err(crate::app::terminal_targets::TerminalTargetError::NotFound { .. })
+        ));
     }
 
     #[test]
-    fn terminal_target_resolves_legacy_pane_id() {
+    fn agent_target_rejects_a_pane_that_only_has_a_launch_command() {
+        let mut app = test_app();
+        let workspace = Workspace::test_new("terminal-target-command");
+        let pane = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane).unwrap().clone();
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .launch_argv = Some(vec!["just".into(), "dev".into()]);
+        let pane_id = app.public_pane_id(0, pane).unwrap();
+
+        assert!(app.resolve_terminal_target(&pane_id).is_ok());
+        assert!(matches!(
+            app.resolve_agent_target(&pane_id),
+            Err(crate::app::terminal_targets::TerminalTargetError::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn terminal_target_resolves_pane_id_for_an_agent() {
         let mut app = test_app();
         let workspace = Workspace::test_new("terminal-target-pane");
         let pane = workspace.tabs[0].root_pane;
         let terminal_id = workspace.terminal_id(pane).unwrap().to_string();
         app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        let attached_terminal_id = app.state.workspaces[0].terminal_id(pane).cloned().unwrap();
+        app.state
+            .terminals
+            .get_mut(&attached_terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
         app.state.active = Some(0);
         app.state.selected = 0;
         let pane_id = app.public_pane_id(0, pane).unwrap();
@@ -3958,6 +4009,27 @@ mod tests {
 
         assert_eq!(resolved.pane_id, pane);
         assert_eq!(resolved.terminal_id, terminal_id);
+    }
+
+    #[test]
+    fn agent_target_treats_legacy_pane_syntax_as_a_name() {
+        let mut app = test_app();
+        let workspace = Workspace::test_new("agent-target-name");
+        let pane = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane).unwrap().clone();
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Pi),
+            crate::detect::AgentState::Idle,
+        );
+        terminal.set_agent_name("p_1".into());
+
+        let resolved = app.resolve_agent_target("p_1").unwrap();
+
+        assert_eq!(resolved.pane_id, pane);
+        assert_eq!(resolved.terminal_id, terminal_id.to_string());
     }
 
     #[test]

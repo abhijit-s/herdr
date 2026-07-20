@@ -3,9 +3,14 @@
 ## Unreleased
 
 ### Added
-- Added named-agent `start`, `prompt`, and completion-wait workflows. Agent startup now targets an existing pane without changing topology, validates the requested interactive agent kind, and accepts optional native arguments after `--`.
+- Added a live-agent CLI facade with named `start`, atomic `prompt`, logical `send-keys`, and server-owned `wait` workflows. Agent startup targets an existing pane without changing topology, validates the requested interactive agent kind and strict agent name, and accepts native arguments after `--`.
+- Added transient declarative Agent view queries through `agent.view.set/clear`; filtered and sorted views now define sidebar, mobile, mouse, and agent-keybind navigation order.
+- Added one-shot plugin `[[startup]]` hooks for restoring plugin-owned state after server startup and live handoff.
 - Added `ui.sidebar_start_collapsed` to launch Herdr with the sidebar collapsed. (#1463)
 - Added macOS support for the `HERDR_AGENT=<agent>` foreground-process hint, allowing agents hidden behind host-visible wrappers such as `nono` to use the named agent's screen manifest. (#679)
+
+### Changed
+- Agent commands now accept only a unique live agent name or the pane ID currently hosting that agent. Names are cleared when the occupant exits, is released, or is replaced. The old top-level `wait` commands were replaced by `agent wait` and `pane wait-output`, and `agent send` was replaced by `agent send-keys`.
 
 ### Fixed
 - `herdr config check` now reports unknown config keys with their full paths instead of treating ignored typos as valid configuration. (#1573)

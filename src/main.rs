@@ -568,7 +568,6 @@ fn main() -> io::Result<()> {
         println!("       herdr notification <subcommand> ...");
         println!("       herdr agent <subcommand> ...");
         println!("       herdr pane <subcommand> ...");
-        println!("       herdr wait <subcommand> ...");
         println!("       herdr session <subcommand> ...");
         println!("       herdr integration <subcommand> ...");
         println!();
@@ -625,10 +624,6 @@ fn main() -> io::Result<()> {
             (
                 "herdr pane <subcommand>",
                 "Pane control helpers over the socket API",
-            ),
-            (
-                "herdr wait <subcommand>",
-                "Blocking wait helpers over the socket API",
             ),
             (
                 "herdr session <subcommand>",
@@ -690,7 +685,7 @@ fn main() -> io::Result<()> {
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
             eprintln!("run 'herdr --help' for usage");
-            std::process::exit(1);
+            std::process::exit(2);
         }
         if !arg.starts_with('-')
             && ![
@@ -704,7 +699,6 @@ fn main() -> io::Result<()> {
                 "workspace",
                 "worktree",
                 "pane",
-                "wait",
                 "session",
                 "integration",
             ]
@@ -712,7 +706,7 @@ fn main() -> io::Result<()> {
         {
             eprintln!("unknown command: {arg}");
             eprintln!("run 'herdr --help' for usage");
-            std::process::exit(1);
+            std::process::exit(2);
         }
     }
 

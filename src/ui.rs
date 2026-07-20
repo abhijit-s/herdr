@@ -57,8 +57,7 @@ pub(crate) use self::scrollbar::{
 use self::settings::render_settings_overlay;
 use self::sidebar::{render_sidebar, render_sidebar_collapsed};
 use self::status::{
-    copy_feedback_rect, render_copy_feedback, render_toast_notification,
-    toast_notification_rect,
+    copy_feedback_rect, render_copy_feedback, render_toast_notification, toast_notification_rect,
 };
 pub(crate) use self::tab_surface::{
     compute_tab_surface, render_tab_surface, resize_tab_surface, TabSurfaceLayout,
@@ -79,12 +78,12 @@ pub(crate) use self::{
     sidebar::{
         agent_entry_gap, agent_entry_height_in_body, agent_panel_body_rect, agent_panel_entries,
         agent_panel_scroll_for_target, agent_panel_scroll_metrics, agent_panel_scrollbar_rect,
-        agent_panel_toggle_rect, collapsed_sidebar_sections, collapsed_sidebar_toggle_rect,
-        compute_workspace_card_areas, expanded_sidebar_sections, expanded_sidebar_toggle_rect,
-        normalized_workspace_scroll, sidebar_section_divider_rect, workspace_drop_indicator_row,
-        workspace_list_entries, workspace_list_entries_expanded, workspace_list_rect,
-        workspace_list_scroll_metrics, workspace_list_scrollbar_rect, workspace_parent_group_state,
-        WorkspaceListEntry,
+        agent_panel_toggle_rect, all_agent_panel_entries, collapsed_sidebar_sections,
+        collapsed_sidebar_toggle_rect, compute_workspace_card_areas, expanded_sidebar_sections,
+        expanded_sidebar_toggle_rect, normalized_workspace_scroll, sidebar_section_divider_rect,
+        workspace_drop_indicator_row, workspace_list_entries, workspace_list_entries_expanded,
+        workspace_list_rect, workspace_list_scroll_metrics, workspace_list_scrollbar_rect,
+        workspace_parent_group_state, AgentPanelEntry, WorkspaceListEntry,
     },
 };
 pub(crate) use self::{
@@ -474,7 +473,9 @@ pub fn render_with_runtime_registry(
         Mode::Prefix => render_prefix_overlay(app, frame, terminal_area),
         Mode::Copy => render_copy_mode_overlay(app, frame, terminal_area),
         Mode::Resize => render_resize_overlay(app, frame, terminal_area),
-        Mode::ConfirmClose => render_confirm_close_overlay(app, frame, terminal_area),
+        Mode::ConfirmClose => {
+            render_confirm_close_overlay(app, terminal_runtimes, frame, terminal_area)
+        }
         Mode::ContextMenu => {
             render_context_menu(app, frame);
         }
@@ -748,16 +749,27 @@ mod tests {
         app.active = Some(0);
         app.selected = 0;
         app.mode = Mode::Terminal;
-        app.config_diagnostic = Some("config.toml:100:10; herdr config check".into());
+        app.config_diagnostic = Some("line 10 invalid".into());
+        app.toast = Some(crate::app::state::ToastNotification {
+            kind: crate::app::state::ToastKind::ConfigWarning,
+            title: "config.toml".into(),
+            context: "line 10 invalid".into(),
+            position: None,
+            target: None,
+        });
 
         let area = Rect::new(0, 0, 44, 20);
         compute_view(&mut app, area);
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
         terminal.draw(|frame| render(&app, frame)).unwrap();
-        let row = buffer_row_text(terminal.backend().buffer(), area, app.view.terminal_area.y);
 
-        assert!(row.contains("config.toml:100:10"), "{row}");
-        assert!(row.contains("herdr config check"), "{row}");
+        assert!(app.view.terminal_area.height > 0);
+
+        let banner_rect = mobile_toast_banner_rect(area, app.config_diagnostic.is_some());
+        let row = buffer_row_text(terminal.backend().buffer(), area, banner_rect.y);
+
+        assert!(row.contains("config warning"), "{row}");
+        assert!(row.contains("line 10 invalid"), "{row}");
     }
 
     #[test]

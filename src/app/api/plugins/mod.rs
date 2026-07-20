@@ -13,9 +13,9 @@ use crate::api::schema::{
     ResponseResult,
 };
 use crate::app::App;
+pub(super) use manifest::normalize_plugin_id;
 use manifest::{
-    effective_platforms, ensure_platform_supported, normalize_action_id, normalize_plugin_id,
-    normalize_plugin_source,
+    effective_platforms, ensure_platform_supported, normalize_action_id, normalize_plugin_source,
 };
 
 #[cfg(test)]
@@ -110,6 +110,7 @@ impl App {
                 }
                 return encode_error(id, "plugin_registry_save_failed", err.to_string());
             }
+            self.clear_agent_view_for_source(&format!("plugin:{plugin_id}"));
         }
         encode_success(id, ResponseResult::PluginUnlinked { plugin_id, removed })
     }
@@ -593,6 +594,9 @@ impl App {
         let Some(plugin) = self.state.installed_plugins.get(&plugin_id).cloned() else {
             return encode_error(id, "plugin_not_found", "plugin not found");
         };
+        if !enabled {
+            self.clear_agent_view_for_source(&format!("plugin:{plugin_id}"));
+        }
         if enabled {
             encode_success(id, ResponseResult::PluginEnabled { plugin })
         } else {
@@ -946,6 +950,101 @@ platforms = ["linux", "macos", "windows"]
     }
 
     #[test]
+    fn plugin_manifest_preserves_whitespace_only_command_arguments() {
+        let root = unique_temp_path("plugin-whitespace-argv");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.whitespace-argv"
+name = "Whitespace argv"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "cut"
+title = "Cut on tab"
+command = ["awk", "-F", "\t", " {print $1} "]
+"#,
+        );
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true)
+            .expect("literal whitespace argv elements should be valid");
+        assert_eq!(plugin.panes[0].command, ["awk", "-F", "\t", " {print $1} "]);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plugin_manifest_rejects_empty_command_elements() {
+        for (name, command) in [("array", "[]"), ("element", r#"["echo", ""]"#)] {
+            let root = unique_temp_path(&format!("plugin-empty-command-{name}"));
+            write_manifest_content(
+                &root,
+                &format!(
+                    r#"
+id = "example.empty-command-{name}"
+name = "Empty command {name}"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "empty"
+title = "Empty command"
+command = {command}
+"#
+                ),
+            );
+
+            let result = load_plugin_manifest(&root.display().to_string(), true);
+            assert!(matches!(result, Err(("invalid_plugin_command", _))));
+
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn plugin_manifest_preserves_legacy_event_order_with_exact_argv() {
+        let root = unique_temp_path("plugin-event-whitespace-order");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.event-whitespace-order"
+name = "Event whitespace order"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["linux", "macos"]
+
+[[events]]
+on = "workspace.created"
+command = ["echo", "!"]
+
+[[events]]
+on = "workspace.created"
+command = ["echo", " a"]
+
+[[events]]
+on = "workspace.created"
+command = ["echo", "a ", "first"]
+
+[[events]]
+on = "workspace.created"
+command = ["echo", " a", "first "]
+"#,
+        );
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true)
+            .expect("event commands with whitespace should load");
+        assert_eq!(plugin.events[0].command, ["echo", "!"]);
+        assert_eq!(plugin.events[1].command, ["echo", " a"]);
+        assert_eq!(plugin.events[2].command, ["echo", "a ", "first"]);
+        assert_eq!(plugin.events[3].command, ["echo", " a", "first "]);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn plugin_link_rejects_invalid_github_source_path() {
         let mut app = test_app();
         let root = unique_temp_path("plugin-invalid-source");
@@ -1125,6 +1224,38 @@ command = ["echo", "b"]
     }
 
     #[test]
+    fn startup_hook_manifest_loads() {
+        let root = unique_temp_path("plugin-startup-manifest");
+        write_manifest_content(
+            &root,
+            r#"
+id = "example.startup-manifest"
+name = "Startup Manifest"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos", "windows"]
+
+[[startup]]
+command = ["node", "restore.js"]
+platforms = ["linux", "macos"]
+"#,
+        );
+
+        let plugin = load_plugin_manifest(&root.display().to_string(), true).unwrap();
+
+        assert_eq!(plugin.startup.len(), 1);
+        assert_eq!(plugin.startup[0].command, ["node", "restore.js"]);
+        assert_eq!(
+            plugin.startup[0].platforms,
+            Some(vec![
+                crate::api::schema::PluginPlatform::Linux,
+                crate::api::schema::PluginPlatform::Macos,
+            ])
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn smoke_fixture_manifest_loads() {
         let plugin = load_plugin_manifest("tests/fixtures/plugin-smoke", true)
             .expect("smoke fixture should load");
@@ -1148,6 +1279,12 @@ command = ["echo", "b"]
         let root = unique_temp_path("plugin-enable-disable");
         write_manifest(&root);
         link_manifest(&mut app, &root);
+        app.state.agent_view_override = Some(crate::api::schema::AgentViewSetParams {
+            source: "plugin:example.worktree-bootstrap".into(),
+            label: None,
+            filter: None,
+            sort: Vec::new(),
+        });
 
         let disabled = app.handle_api_request(Request {
             id: "disable".into(),
@@ -1159,6 +1296,19 @@ command = ["echo", "b"]
             panic!("expected disabled response: {disabled}");
         };
         assert!(!plugin.enabled);
+        assert!(app.state.agent_view_override.is_none());
+        let delayed_restore = app.handle_api_request(Request {
+            id: "delayed-startup-restore".into(),
+            method: Method::AgentViewSet(crate::api::schema::AgentViewSetParams {
+                source: "plugin:example.worktree-bootstrap".into(),
+                label: None,
+                filter: None,
+                sort: Vec::new(),
+            }),
+        });
+        let delayed_restore: crate::api::schema::ErrorResponse =
+            serde_json::from_str(&delayed_restore).unwrap();
+        assert_eq!(delayed_restore.error.code, "plugin_disabled");
 
         let enabled = app.handle_api_request(Request {
             id: "enable".into(),
@@ -2175,6 +2325,43 @@ command = ["sh", "-c", "printf '%s\n%s\n%s' \"$HERDR_PLUGIN_ROOT\" \"$HERDR_PLUG
         let context = app.current_plugin_context("selection-test");
 
         assert_eq!(context.selected_text.as_deref(), Some("hello"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_hooks_run_once_with_plugin_environment() {
+        let mut app = test_app();
+        let root = unique_temp_path("plugin-startup-hook");
+        let capture = root.join("startup.txt");
+        write_manifest_content(
+            &root,
+            &format!(
+                r#"
+id = "example.startup"
+name = "Startup"
+version = "0.1.0"
+min_herdr_version = "0.6.10"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "-c", "printf '%s:%s' \"$HERDR_PLUGIN_ID\" \"$HERDR_PLUGIN_EVENT\" > {}"]
+"#,
+                capture.display()
+            ),
+        );
+        link_manifest(&mut app, &root);
+
+        app.run_plugin_startup_hooks();
+
+        assert_eq!(
+            read_capture_when_ready(&capture, || {
+                app.drain_all_internal_events();
+            }),
+            "example.startup:startup"
+        );
+        let plugin = app.state.installed_plugins.get("example.startup").unwrap();
+        assert_eq!(plugin.startup.len(), 1);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
