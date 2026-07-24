@@ -5846,7 +5846,7 @@ next_tab = ""
         assert!(
             server.handle_internal_event_with_forwarding(AppEvent::HookStateReported {
                 pane_id,
-                source: "herdr:pi".into(),
+                source: "custom:pi".into(),
                 agent_label: "pi".into(),
                 state: crate::detect::AgentState::Working,
                 message: None,
@@ -5859,7 +5859,7 @@ next_tab = ""
                 pane_id,
                 source: "user:pi-display".into(),
                 agent_label: Some("pi".into()),
-                applies_to_source: Some("herdr:pi".into()),
+                applies_to_source: Some("custom:pi".into()),
                 title: Some("short lived".into()),
                 display_agent: None,
                 state_labels: HashMap::new(),
@@ -9528,6 +9528,34 @@ next_tab = ""
             .unwrap()
             .attached_terminal_id
             .clone();
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(
+                Some(crate::detect::Agent::Pi),
+                crate::detect::AgentState::Idle,
+            );
+        server
+            .app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:pi".into(),
+                agent: "pi".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::path(
+                    std::env::current_dir()
+                        .unwrap()
+                        .join("headless-pi-session.jsonl")
+                        .display()
+                        .to_string(),
+                )
+                .unwrap(),
+            });
         server
             .app
             .state
