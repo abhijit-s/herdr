@@ -1405,6 +1405,73 @@ impl AppState {
         true
     }
 
+    pub fn move_workspace_block(
+        &mut self,
+        workspace_ids: &[String],
+        before_workspace_id: Option<&str>,
+    ) -> bool {
+        let moved_ids = workspace_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        if moved_ids.is_empty()
+            || moved_ids.len() != workspace_ids.len()
+            || !workspace_ids
+                .iter()
+                .all(|id| self.workspaces.iter().any(|workspace| workspace.id == *id))
+            || before_workspace_id.is_some_and(|id| {
+                moved_ids.contains(id)
+                    || !self.workspaces.iter().any(|workspace| workspace.id == id)
+            })
+        {
+            return false;
+        }
+
+        let mut desired_ids = self
+            .workspaces
+            .iter()
+            .filter(|workspace| !moved_ids.contains(workspace.id.as_str()))
+            .map(|workspace| workspace.id.clone())
+            .collect::<Vec<_>>();
+        let insert_idx = before_workspace_id
+            .and_then(|id| desired_ids.iter().position(|candidate| candidate == id))
+            .unwrap_or(desired_ids.len());
+        desired_ids.splice(insert_idx..insert_idx, workspace_ids.iter().cloned());
+        if self
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id.as_str())
+            .eq(desired_ids.iter().map(String::as_str))
+        {
+            return false;
+        }
+
+        let active_id = self.active.map(|idx| self.workspaces[idx].id.clone());
+        let selected_id = self
+            .workspaces
+            .get(self.selected)
+            .map(|workspace| workspace.id.clone());
+        let desired_positions = desired_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (id.clone(), index))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        self.mark_session_dirty();
+        self.workspaces.sort_by_key(|workspace| {
+            desired_positions
+                .get(&workspace.id)
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+        self.active = active_id.and_then(|id| self.workspaces.iter().position(|ws| ws.id == id));
+        self.selected = selected_id
+            .and_then(|id| self.workspaces.iter().position(|ws| ws.id == id))
+            .unwrap_or(0);
+        self.ensure_workspace_visible(self.selected);
+        true
+    }
+
     pub fn scroll_tabs_left(&mut self) {
         self.tab_scroll_follow_active = false;
         self.tab_scroll = self.tab_scroll.saturating_sub(1);
@@ -2078,7 +2145,7 @@ impl AppState {
         self.selection_autoscroll = None;
     }
 
-    pub(crate) fn copy_word_at_pane_cell(
+    pub(crate) fn select_word_at_pane_cell(
         &mut self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
         pane_id: crate::layout::PaneId,
@@ -2128,23 +2195,30 @@ impl AppState {
             return false;
         };
 
-        // Copy the token and keep its selection visible as short-lived feedback.
         let mut selection = Selection::range(pane_id, viewport_row, start_col, end_col, metrics);
         if !selection.finish() {
             return false;
         }
 
-        let Some(text) = rt
-            .extract_selection(&selection)
-            .filter(|text| !text.is_empty())
-        else {
-            self.clear_selection();
-            return false;
+        let text = if self.copy_on_select {
+            let Some(text) = rt
+                .extract_selection(&selection)
+                .filter(|text| !text.is_empty())
+            else {
+                self.clear_selection();
+                return false;
+            };
+            Some(text)
+        } else {
+            None
         };
-        self.request_clipboard_write = Some(text.into_bytes());
+
         self.selection = Some(selection);
         self.selection_autoscroll = None;
-        info!("copied double-clicked token to clipboard");
+        if let Some(text) = text {
+            self.request_clipboard_write = Some(text.into_bytes());
+            info!("copied double-clicked token to clipboard");
+        }
         true
     }
 
@@ -2199,7 +2273,7 @@ impl AppState {
             Some(sel) => sel,
             None => return,
         };
-        if !sel.finish() {
+        if !sel.is_finalized() && !sel.finish() {
             return;
         }
 
@@ -2615,11 +2689,21 @@ impl AppState {
             }
 
             let ws = &mut self.workspaces[ws_idx];
-            if ws.cached_git_branch != result.branch {
+            if ws.cached_identity_cwd != result.resolved_identity_cwd {
+                ws.cached_identity_cwd = result.resolved_identity_cwd;
+            }
+            if ws.cached_auto_label != result.auto_label {
+                ws.cached_auto_label = result.auto_label;
+                changed |= ws.custom_name.is_none();
+            }
+            if ws.cached_git_status_key != result.status_cache_key {
+                ws.cached_git_status_key = result.status_cache_key;
+            }
+            if result.demand.branch && ws.cached_git_branch != result.branch {
                 ws.cached_git_branch = result.branch;
                 changed = true;
             }
-            if ws.cached_git_ahead_behind != result.ahead_behind {
+            if result.demand.ahead_behind && ws.cached_git_ahead_behind != result.ahead_behind {
                 ws.cached_git_ahead_behind = result.ahead_behind;
                 changed = true;
             }
@@ -3112,7 +3196,8 @@ impl AppState {
         let sound = sound_for_toast_kind(kind, suppress_active_tab_notifications)
             .filter(|_| self.sound.allows(known_agent));
         let build_toast = || {
-            let workspace_label = self.workspaces[ws_idx].display_name();
+            let workspace_label =
+                self.workspaces[ws_idx].display_name_from_terminals(&self.terminals);
             let context =
                 notification_context(&self.workspaces[ws_idx], &workspace_label, ws_idx, pane_id);
             ToastNotification {
@@ -3927,7 +4012,10 @@ mod tests {
             &terminal_runtimes,
             vec![WorkspaceGitStatus {
                 workspace_id: first_id,
-                resolved_identity_cwd: first_cwd,
+                resolved_identity_cwd: first_cwd.clone(),
+                status_cache_key: first_cwd,
+                demand: crate::workspace::GitStatusRefreshDemand::ALL,
+                auto_label: "one".into(),
                 branch: Some("main".into()),
                 ahead_behind: Some((2, 1)),
                 space: None,
@@ -3954,6 +4042,9 @@ mod tests {
             vec![WorkspaceGitStatus {
                 workspace_id,
                 resolved_identity_cwd: std::path::PathBuf::from("/definitely/not/current"),
+                status_cache_key: std::path::PathBuf::from("/definitely/not/current"),
+                demand: crate::workspace::GitStatusRefreshDemand::ALL,
+                auto_label: "stale".into(),
                 branch: Some("main".into()),
                 ahead_behind: Some((0, 1)),
                 space: None,
@@ -3963,6 +4054,36 @@ mod tests {
         assert!(!changed);
         assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
         assert_eq!(state.workspaces[0].git_ahead_behind(), Some((1, 0)));
+    }
+
+    #[test]
+    fn apply_workspace_git_statuses_ignores_unrequested_branch_changes() {
+        let mut state = app_with_workspaces(&["one"]);
+        let workspace_id = state.workspaces[0].id.clone();
+        let cwd = state.workspaces[0].resolved_identity_cwd().unwrap();
+        state.workspaces[0].cached_auto_label = "one".into();
+        state.workspaces[0].cached_git_branch = Some("old".into());
+
+        let terminal_runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+        let changed = state.apply_workspace_git_statuses(
+            &terminal_runtimes,
+            vec![WorkspaceGitStatus {
+                workspace_id,
+                resolved_identity_cwd: cwd.clone(),
+                status_cache_key: cwd,
+                demand: crate::workspace::GitStatusRefreshDemand {
+                    branch: false,
+                    ahead_behind: true,
+                },
+                auto_label: "one".into(),
+                branch: Some("new".into()),
+                ahead_behind: None,
+                space: None,
+            }],
+        );
+
+        assert!(!changed);
+        assert_eq!(state.workspaces[0].branch().as_deref(), Some("old"));
     }
 
     #[test]
@@ -3978,7 +4099,10 @@ mod tests {
             &terminal_runtimes,
             vec![WorkspaceGitStatus {
                 workspace_id,
-                resolved_identity_cwd: cwd,
+                resolved_identity_cwd: cwd.clone(),
+                status_cache_key: cwd,
+                demand: crate::workspace::GitStatusRefreshDemand::ALL,
+                auto_label: "one".into(),
                 branch: None,
                 ahead_behind: None,
                 space: None,
@@ -4003,7 +4127,10 @@ mod tests {
             &terminal_runtimes,
             vec![WorkspaceGitStatus {
                 workspace_id,
-                resolved_identity_cwd: cwd,
+                resolved_identity_cwd: cwd.clone(),
+                status_cache_key: cwd,
+                demand: crate::workspace::GitStatusRefreshDemand::ALL,
+                auto_label: "other".into(),
                 branch: Some("scratch".into()),
                 ahead_behind: None,
                 space: Some(crate::workspace::GitSpaceMetadata {
@@ -4401,6 +4528,59 @@ mod tests {
             .map(|ws| ws.display_name())
             .collect();
         assert_eq!(names, vec!["b", "c", "a"]);
+    }
+
+    #[test]
+    fn move_workspace_block_collects_non_contiguous_members() {
+        let mut state =
+            app_with_workspaces(&["child-one", "normal", "parent", "child-two", "tail"]);
+        let parent_id = state.workspaces[2].id.clone();
+        let child_one_id = state.workspaces[0].id.clone();
+        let child_two_id = state.workspaces[3].id.clone();
+        let tail_id = state.workspaces[4].id.clone();
+        state.active = Some(0);
+        state.selected = 4;
+
+        assert!(state.move_workspace_block(
+            &[parent_id, child_one_id.clone(), child_two_id],
+            Some(&tail_id),
+        ));
+
+        let names = state
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.display_name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            ["normal", "parent", "child-one", "child-two", "tail"]
+        );
+        assert_eq!(state.workspaces[state.active.unwrap()].id, child_one_id);
+        assert_eq!(state.workspaces[state.selected].id, tail_id);
+    }
+
+    #[test]
+    fn move_workspace_block_rejects_invalid_and_noop_orders() {
+        let mut state = app_with_workspaces(&["a", "b", "c"]);
+        let ids = state
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id.clone())
+            .collect::<Vec<_>>();
+
+        assert!(!state.move_workspace_block(&[], None));
+        assert!(!state.move_workspace_block(&[ids[0].clone(), ids[0].clone()], None));
+        assert!(!state.move_workspace_block(&["missing".into()], None));
+        assert!(!state.move_workspace_block(&[ids[0].clone()], Some(&ids[0])));
+        assert!(!state.move_workspace_block(&[ids[0].clone()], Some(&ids[1])));
+        assert_eq!(
+            state
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.display_name())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod api_helpers;
 pub(crate) mod command_palette;
 mod config_io;
 mod creation;
+mod git_refresh;
 mod ids;
 mod input;
 mod popup;
@@ -39,6 +40,7 @@ pub(crate) const HEADLESS_ANIMATION_TICK_STEP: u32 = 8;
 pub(crate) const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(30);
 const RESIZE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const GIT_REMOTE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
+const GIT_REPO_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const AUTO_UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 const PENDING_AGENT_RESUME_THEME_WAIT: Duration = Duration::from_millis(750);
 const SESSION_SAVE_DEBOUNCE: Duration = Duration::from_secs(5);
@@ -111,8 +113,10 @@ pub struct App {
     pub(crate) copy_feedback_deadline: Option<Instant>,
     pub(crate) last_api_notification_at: Option<Instant>,
     pub(crate) last_git_remote_status_refresh: Instant,
+    pub(crate) last_git_repo_discovery_refresh: Instant,
     pub(crate) git_refresh_in_flight: bool,
     pub(crate) git_refresh_due_after_in_flight: bool,
+    pub(crate) git_identity_refresh_requested: bool,
     pub(crate) git_status_cache: HashMap<std::path::PathBuf, crate::workspace::GitStatusCacheEntry>,
     pub(crate) pending_api_worktree_creates: HashMap<std::path::PathBuf, u64>,
     pub(crate) pending_api_worktree_removes: HashMap<String, u64>,
@@ -592,7 +596,7 @@ impl App {
                     preview: announcement.preview,
                 }
             }),
-            keybind_help: state::KeybindHelpState { scroll: 0 },
+            keybind_help: state::KeybindHelpState::default(),
             navigator: state::NavigatorState::default(),
             command_palette: command_palette::CommandPaletteState::default(),
             command_palette_sources: command_palette::SourceToggles {
@@ -778,8 +782,10 @@ impl App {
             event_tx,
             event_rx,
             last_git_remote_status_refresh: Instant::now() - GIT_REMOTE_STATUS_REFRESH_INTERVAL,
+            last_git_repo_discovery_refresh: Instant::now(),
             git_refresh_in_flight: false,
             git_refresh_due_after_in_flight: false,
+            git_identity_refresh_requested: false,
             git_status_cache: HashMap::new(),
             pending_api_worktree_creates: HashMap::new(),
             pending_api_worktree_removes: HashMap::new(),
@@ -936,10 +942,11 @@ impl App {
     pub(crate) fn handle_internal_event_with_prefix_sync(
         &mut self,
         event: crate::events::AppEvent,
-    ) {
+    ) -> bool {
         let previous_mode = self.state.mode;
-        self.handle_internal_event(event);
+        let changed = self.handle_internal_event_with_render_impact(event);
         self.sync_prefix_input_source(previous_mode);
+        changed
     }
 
     #[cfg(test)]
@@ -1170,8 +1177,9 @@ impl App {
             match event {
                 LoopEvent::Timer => {}
                 LoopEvent::Internal(ev) => {
-                    self.handle_internal_event_with_prefix_sync(ev);
-                    needs_render = true;
+                    if self.handle_internal_event_with_prefix_sync(ev) {
+                        needs_render = true;
+                    }
                 }
                 LoopEvent::Api(msg) => {
                     if self.handle_api_request_message(*msg) {
@@ -1676,7 +1684,9 @@ impl App {
                             if self.state.popup_pane.is_some() || self.state.mode == Mode::Terminal
                             {
                                 self.suppressed_repeat_keys.remove(&pressed_key_id);
-                                if let Some(target) = self.handle_terminal_key_headless(key) {
+                                if let Some(target) =
+                                    self.handle_terminal_key_headless_from(source_id, key)
+                                {
                                     if !key.is_text_commit {
                                         self.pressed_terminal_keys.insert(
                                             pressed_key_id,
@@ -1705,7 +1715,7 @@ impl App {
                                 || self.state.mode == Mode::Terminal)
                                 && !self.suppressed_repeat_keys.contains(&pressed_key_id)
                             {
-                                let _ = self.handle_terminal_key_headless(key);
+                                let _ = self.handle_terminal_key_headless_from(source_id, key);
                             }
                         }
                         crossterm::event::KeyEventKind::Release => {
@@ -1826,7 +1836,7 @@ impl App {
                 self.handle_context_menu_key_via_api(key_event);
             }
             Mode::KeybindHelp => {
-                input::handle_keybind_help_key(&mut self.state, key_event);
+                input::handle_keybind_help_key(&mut self.state, key);
             }
             Mode::GlobalMenu => {
                 input::handle_global_menu_key(&mut self.state, key_event);
@@ -2187,6 +2197,20 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_git_status_event_has_no_render_impact() {
+        let mut app = test_app();
+        app.git_refresh_in_flight = true;
+
+        let changed = app.handle_internal_event_with_prefix_sync(AppEvent::GitStatusRefreshed {
+            results: Vec::new(),
+            cache_updates: Vec::new(),
+        });
+
+        assert!(!changed);
+        assert!(!app.git_refresh_in_flight);
+    }
+
+    #[test]
     fn git_status_event_clears_in_flight_refresh() {
         let mut app = test_app();
         app.git_refresh_in_flight = true;
@@ -2213,7 +2237,10 @@ mod tests {
         app.handle_internal_event(AppEvent::GitStatusRefreshed {
             results: vec![crate::workspace::WorkspaceGitStatus {
                 workspace_id,
-                resolved_identity_cwd,
+                resolved_identity_cwd: resolved_identity_cwd.clone(),
+                status_cache_key: resolved_identity_cwd,
+                demand: crate::workspace::GitStatusRefreshDemand::ALL,
+                auto_label: "one".into(),
                 branch: Some("render-dirty-test".into()),
                 ahead_behind: Some((1, 0)),
                 space: None,
@@ -2441,6 +2468,21 @@ mod tests {
             }
         );
         assert!(app.state.toast.is_none());
+    }
+
+    #[test]
+    fn unchanged_git_status_drain_has_no_render_impact() {
+        let mut app = test_app();
+        app.git_refresh_in_flight = true;
+        app.event_tx
+            .try_send(AppEvent::GitStatusRefreshed {
+                results: Vec::new(),
+                cache_updates: Vec::new(),
+            })
+            .unwrap();
+
+        assert!(!app.drain_internal_events());
+        assert!(!app.git_refresh_in_flight);
     }
 
     #[test]
@@ -5082,7 +5124,7 @@ last_pane = "prefix+tab"
     }
 
     #[tokio::test]
-    async fn host_report_all_follows_the_focused_terminal_protocol() {
+    async fn host_report_all_follows_terminal_protocol_and_command_modes() {
         let mut app = test_app();
         let mut workspace = Workspace::test_new("test");
         let focused = workspace.focused_pane_id().unwrap();
@@ -5117,6 +5159,10 @@ last_pane = "prefix+tab"
 
         assert!(app.state.focus_pane_in_workspace(0, focused));
         app.state.mode = Mode::Prefix;
+        assert!(app.host_keyboard_report_all_requested());
+        app.state.mode = Mode::Navigate;
+        assert!(app.host_keyboard_report_all_requested());
+        app.state.mode = Mode::RenameWorkspace;
         assert!(!app.host_keyboard_report_all_requested());
     }
 
@@ -5777,6 +5823,45 @@ last_pane = "prefix+tab"
         );
         assert!(tiled_rx.try_recv().is_err());
         assert!(app.state.popup_pane.is_none());
+    }
+
+    #[tokio::test]
+    async fn popup_mouse_motion_preserves_scrollback() {
+        let mut app = test_app();
+        app.state.mode = Mode::Terminal;
+        app.state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        let (popup_runtime, mut popup_rx) = TerminalRuntime::test_with_channel_and_scrollback_bytes(
+            40,
+            2,
+            1024,
+            b"one\r\ntwo\r\nthree\r\n\x1b[?1003h\x1b[?1006h",
+            4,
+        );
+        popup_runtime.scroll_up(1);
+        assert!(popup_runtime
+            .scroll_metrics()
+            .is_some_and(|metrics| metrics.offset_from_bottom > 0));
+        app.install_test_popup_runtime(popup_runtime);
+        let (_, inner) =
+            crate::ui::popup_pane_rects(&app.state, app.state.view.terminal_area).unwrap();
+
+        app.route_client_events(
+            vec![crate::raw_input::RawInputEvent::Mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Moved,
+                    column: inner.x + 1,
+                    row: inner.y,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            )],
+            true,
+        );
+
+        assert!(popup_rx.try_recv().is_ok());
+        assert!(app
+            .popup_runtime()
+            .and_then(TerminalRuntime::scroll_metrics)
+            .is_some_and(|metrics| metrics.offset_from_bottom > 0));
     }
 
     #[tokio::test]
