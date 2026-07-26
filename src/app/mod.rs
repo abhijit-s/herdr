@@ -5124,7 +5124,7 @@ last_pane = "prefix+tab"
     }
 
     #[tokio::test]
-    async fn host_report_all_follows_terminal_protocol_and_command_modes() {
+    async fn host_report_all_follows_the_focused_terminal_protocol() {
         let mut app = test_app();
         let mut workspace = Workspace::test_new("test");
         let focused = workspace.focused_pane_id().unwrap();
@@ -5159,10 +5159,6 @@ last_pane = "prefix+tab"
 
         assert!(app.state.focus_pane_in_workspace(0, focused));
         app.state.mode = Mode::Prefix;
-        assert!(app.host_keyboard_report_all_requested());
-        app.state.mode = Mode::Navigate;
-        assert!(app.host_keyboard_report_all_requested());
-        app.state.mode = Mode::RenameWorkspace;
         assert!(!app.host_keyboard_report_all_requested());
     }
 
