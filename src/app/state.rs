@@ -1565,8 +1565,6 @@ pub struct AppState {
     /// separate from `status_strip` so pushed values survive a config reload.
     pub(crate) status_slots: crate::ui::status_right::SlotStore,
     pub keybinds: Keybinds,
-    /// Frame counter for spinner animations (wraps around).
-    pub spinner_tick: u32,
     /// UI color palette — all sidebar/UI colors centralized for theming.
     pub palette: Palette,
     /// Currently applied theme name (for settings UI).
@@ -1939,7 +1937,6 @@ impl AppState {
             status_strip: crate::ui::status_right::StatusStripState::default(),
             status_slots: crate::ui::status_right::SlotStore::default(),
             keybinds: Keybinds::default(),
-            spinner_tick: 0,
             palette: Palette::catppuccin(),
             theme_name: "catppuccin".to_string(),
             theme_runtime: ThemeRuntimeConfig {
