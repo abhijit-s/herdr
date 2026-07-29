@@ -1,4 +1,3 @@
-use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use crate::api::schema::{ResponseResult, StatusClearParams, StatusSetParams};
@@ -51,7 +50,7 @@ impl App {
     /// Reuse the state-change -> repaint path (R6): a pushed value changed the
     /// strip, so flag a redraw. No new polling is introduced.
     fn request_status_strip_repaint(&self) {
-        self.render_dirty.store(true, Ordering::Release);
+        self.render_dirty.request_generic();
         self.render_notify.notify_one();
     }
 }

@@ -29,7 +29,6 @@ mod worktrees;
 use std::collections::{HashMap, HashSet};
 use std::future::pending;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -149,7 +148,7 @@ pub struct App {
         HashMap<(InputSourceId, crossterm::event::KeyCode), PressedTerminalKey>,
     pub(crate) suppressed_repeat_keys: HashSet<(InputSourceId, crossterm::event::KeyCode)>,
     pub render_notify: Arc<Notify>,
-    pub render_dirty: Arc<AtomicBool>,
+    pub(crate) render_dirty: Arc<crate::render_signal::RenderSignal>,
     pub(crate) full_redraw_pending: bool,
     pub(crate) overlay_panes: HashMap<crate::layout::PaneId, OverlayPaneState>,
     pub(crate) local_terminal_notifications: bool,
@@ -390,7 +389,7 @@ impl App {
         crate::kitty_graphics::set_enabled(config.experimental.kitty_graphics);
         let (event_tx, event_rx) = mpsc::channel::<AppEvent>(APP_EVENT_CHANNEL_CAPACITY);
         let render_notify = Arc::new(Notify::new());
-        let render_dirty = Arc::new(AtomicBool::new(false));
+        let render_dirty = Arc::new(crate::render_signal::RenderSignal::new());
         let initial_toast =
             config_diagnostic
                 .as_ref()
@@ -963,7 +962,7 @@ impl App {
 
         while !self.state.should_quit {
             self.reap_finished_custom_commands();
-            if self.render_dirty.load(Ordering::Acquire) {
+            if self.render_dirty.is_pending() {
                 needs_render = true;
             }
             let terminal_title_changed = self.sync_terminal_titles();
@@ -1088,7 +1087,7 @@ impl App {
             self.sync_host_keyboard_report_all(&mut host_keyboard_report_all_active)?;
 
             if needs_render && self.can_render_now(now) {
-                self.render_dirty.swap(false, Ordering::AcqRel);
+                let _ = self.render_dirty.take();
                 let _sync_output = SyncOutputGuard::begin()?;
                 let kitty_graphics_enabled = self.state.kitty_graphics_enabled;
                 if self.full_redraw_pending {
@@ -1138,7 +1137,7 @@ impl App {
                 }
                 self.sync_pending_agent_resume_deadline(now);
                 if self.start_pending_agent_resumes(self.pending_agent_resume_due(now)) {
-                    self.render_dirty.store(true, Ordering::Release);
+                    self.render_dirty.request_generic();
                     self.render_notify.notify_one();
                 }
                 self.last_render_at = Some(now);
@@ -1188,7 +1187,7 @@ impl App {
                     self.input_rx = None;
                 }
                 LoopEvent::RenderRequested => {
-                    if self.render_dirty.load(Ordering::Acquire) {
+                    if self.render_dirty.is_pending() {
                         needs_render = true;
                     }
                 }
@@ -2223,7 +2222,7 @@ mod tests {
     fn git_status_event_marks_render_dirty_when_status_changes() {
         let mut app = test_app();
         app.state.workspaces.push(Workspace::test_new("one"));
-        app.render_dirty.store(false, Ordering::Release);
+        let _ = app.render_dirty.take();
         let workspace_id = app.state.workspaces[0].id.clone();
         let resolved_identity_cwd = app.state.workspaces[0].resolved_identity_cwd().unwrap();
 
@@ -2241,7 +2240,7 @@ mod tests {
             cache_updates: Vec::new(),
         });
 
-        assert!(app.render_dirty.load(Ordering::Acquire));
+        assert!(app.render_dirty.is_pending());
     }
 
     #[test]
