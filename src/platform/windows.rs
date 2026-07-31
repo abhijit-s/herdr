@@ -1,6 +1,7 @@
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
-    ffi::c_void,
+    ffi::{c_void, OsStr},
     mem::{size_of, MaybeUninit},
     path::PathBuf,
     ptr::{copy_nonoverlapping, null_mut},
@@ -15,6 +16,7 @@ use windows_sys::{
             CloseHandle, GlobalFree, LocalFree, HANDLE, HWND, INVALID_HANDLE_VALUE, NTSTATUS,
             STATUS_SUCCESS, UNICODE_STRING,
         },
+        Globalization::{CompareStringOrdinal, CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN},
         System::{
             Console::GetConsoleWindow,
             DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
@@ -25,7 +27,10 @@ use windows_sys::{
                     TH32CS_SNAPPROCESS,
                 },
             },
-            JobObjects::IsProcessInJob,
+            JobObjects::{
+                IsProcessInJob, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            },
             Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
             Ole::CF_UNICODETEXT,
             Threading::{
@@ -42,10 +47,13 @@ use windows_sys::{
                     KEYEVENTF_KEYUP,
                 },
             },
-            Shell::{CommandLineToArgvW, ShellExecuteW},
+            Shell::{
+                CommandLineToArgvW, ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_TIP,
+                NIIF_INFO, NIIF_NOSOUND, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+            },
             WindowsAndMessaging::{
-                GetForegroundWindow, GetWindowThreadProcessId, SendMessageTimeoutW,
-                SMTO_ABORTIFHUNG, WM_IME_CONTROL,
+                CreateWindowExW, DestroyWindow, GetForegroundWindow, GetWindowThreadProcessId,
+                LoadIconW, SendMessageTimeoutW, IDI_APPLICATION, SMTO_ABORTIFHUNG, WM_IME_CONTROL,
             },
         },
     },
@@ -116,6 +124,10 @@ pub(crate) fn interactive_shell_command(argv: &[String], shell_name: &str) -> Op
 
 fn powershell_agent_script(argv: &[String]) -> Option<String> {
     let (program, args) = argv.split_first()?;
+    if args.is_empty() {
+        return Some(format!("& {}", super::quote_powershell_arg(program)));
+    }
+
     let command_line = args
         .iter()
         .map(|arg| quote_windows_command_line_arg(arg))
@@ -241,6 +253,178 @@ pub(crate) fn configure_background_command_platform(command: &mut std::process::
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
+pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std::io::Result<u32> {
+    if current_job_kills_processes_on_close()? {
+        launch_server_daemon_with_wmi(command)
+    } else {
+        command.spawn().map(|child| child.id())
+    }
+}
+
+fn launch_server_daemon_with_wmi(command: &std::process::Command) -> std::io::Result<u32> {
+    // WMI resolves the class from this Rust type name, including CIM casing.
+    #[allow(non_camel_case_types)]
+    #[derive(serde::Deserialize)]
+    struct Win32_Process;
+
+    // WMI serializes this embedded object using the matching CIM class name.
+    #[allow(non_camel_case_types)]
+    #[derive(serde::Serialize)]
+    struct Win32_ProcessStartup {
+        #[serde(rename = "CreateFlags")]
+        create_flags: u32,
+        #[serde(rename = "EnvironmentVariables")]
+        environment_variables: Vec<String>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct CreateInput {
+        #[serde(rename = "CommandLine")]
+        command_line: String,
+        #[serde(rename = "CurrentDirectory")]
+        current_directory: String,
+        #[serde(rename = "ProcessStartupInformation")]
+        process_startup_information: Win32_ProcessStartup,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct CreateOutput {
+        #[serde(rename = "ProcessId")]
+        process_id: Option<u32>,
+        #[serde(rename = "ReturnValue")]
+        return_value: u32,
+    }
+
+    let current_directory = command
+        .get_current_dir()
+        .map(std::path::Path::to_path_buf)
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    let input = CreateInput {
+        command_line: windows_command_line(command)?,
+        current_directory: unicode_windows_value(
+            &current_directory.into_os_string(),
+            "working directory",
+        )?,
+        process_startup_information: Win32_ProcessStartup {
+            create_flags: DETACHED_PROCESS,
+            environment_variables: effective_command_environment(command)?,
+        },
+    };
+
+    let connection = wmi::WMIConnection::new()
+        .map_err(|err| std::io::Error::other(format!("failed to connect to WMI: {err}")))?;
+    let output: CreateOutput = connection
+        .exec_class_method::<Win32_Process, _>("Create", &input)
+        .map_err(|err| std::io::Error::other(format!("WMI Win32_Process.Create failed: {err}")))?;
+    if output.return_value != 0 {
+        return Err(std::io::Error::other(format!(
+            "WMI Win32_Process.Create returned error {}",
+            output.return_value
+        )));
+    }
+    output.process_id.ok_or_else(|| {
+        std::io::Error::other("WMI Win32_Process.Create succeeded without a process id")
+    })
+}
+
+fn windows_command_line(command: &std::process::Command) -> std::io::Result<String> {
+    std::iter::once(command.get_program())
+        .chain(command.get_args())
+        .map(|value| {
+            unicode_windows_value(value, "server command argument")
+                .map(|value| quote_windows_command_line_arg(&value))
+        })
+        .collect::<std::io::Result<Vec<_>>>()
+        .map(|parts| parts.join(" "))
+}
+
+fn effective_command_environment(command: &std::process::Command) -> std::io::Result<Vec<String>> {
+    let mut environment = std::env::vars_os()
+        .map(|(key, value)| {
+            Ok((
+                unicode_windows_value(&key, "inherited environment variable name")?,
+                unicode_windows_value(&value, "inherited environment variable value")?,
+            ))
+        })
+        .collect::<std::io::Result<Vec<(String, String)>>>()?;
+    for (key, value) in command.get_envs() {
+        let key = unicode_windows_value(key, "environment variable name")?;
+        environment.retain(|(inherited, _)| windows_environment_key_cmp(inherited, &key).is_ne());
+        if let Some(value) = value {
+            environment.push((
+                key,
+                unicode_windows_value(value, "environment variable value")?,
+            ));
+        }
+    }
+    environment.sort_unstable_by(|(left, _), (right, _)| windows_environment_key_cmp(left, right));
+    Ok(environment
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect())
+}
+
+fn windows_environment_key_cmp(left: &str, right: &str) -> Ordering {
+    let left_wide: Vec<u16> = left.encode_utf16().collect();
+    let right_wide: Vec<u16> = right.encode_utf16().collect();
+    // SAFETY: both pointers remain valid for the call and lengths count UTF-16 units.
+    match unsafe {
+        CompareStringOrdinal(
+            left_wide.as_ptr(),
+            left_wide.len() as i32,
+            right_wide.as_ptr(),
+            right_wide.len() as i32,
+            1,
+        )
+    } {
+        CSTR_LESS_THAN => Ordering::Less,
+        CSTR_EQUAL => Ordering::Equal,
+        CSTR_GREATER_THAN => Ordering::Greater,
+        _ => left.cmp(right),
+    }
+}
+
+fn unicode_windows_value(value: &OsStr, label: &str) -> std::io::Result<String> {
+    value.to_str().map(str::to_owned).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{label} is not valid Unicode"),
+        )
+    })
+}
+
+fn current_process_is_in_job() -> std::io::Result<bool> {
+    let mut in_job = 0;
+    // SAFETY: `in_job` is a valid writable BOOL for the duration of the call.
+    if unsafe { IsProcessInJob(GetCurrentProcess(), null_mut(), &mut in_job) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(in_job != 0)
+}
+
+fn current_job_kills_processes_on_close() -> std::io::Result<bool> {
+    if !current_process_is_in_job()? {
+        return Ok(false);
+    }
+
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: `limits` is writable and its exact buffer size is supplied.
+    if unsafe {
+        QueryInformationJobObject(
+            null_mut(),
+            JobObjectExtendedLimitInformation,
+            &mut limits as *mut _ as *mut c_void,
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            null_mut(),
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0)
+}
+
 pub fn detach_server_daemon_command(command: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
 
@@ -252,8 +436,7 @@ pub fn current_process_is_detached_server_daemon() -> bool {
         return false;
     }
 
-    let mut in_job = 0;
-    unsafe { IsProcessInJob(GetCurrentProcess(), null_mut(), &mut in_job) != 0 && in_job == 0 }
+    matches!(current_process_is_in_job(), Ok(false))
 }
 
 pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
@@ -305,33 +488,16 @@ fn select_pane_foreground_job(
     entries: &[WindowsProcessEntry],
 ) -> Option<ForegroundJob> {
     let shell = entries.iter().find(|entry| entry.pid == shell_pid)?;
-    let shell_job = || ForegroundJob {
-        process_group_id: shell_pid,
-        processes: vec![foreground_process_from_entry(shell)],
-    };
-
     let descendants = descendant_entries(shell_pid, entries);
     let mut candidates = Vec::new();
-    for entry in &descendants {
-        let process = foreground_process_from_entry(entry);
-        let job = ForegroundJob {
-            process_group_id: entry.pid,
-            processes: vec![process],
-        };
-        if let Some((agent, _)) = crate::detect::identify_agent_in_job(&job) {
-            candidates.push((*entry, agent));
+    for entry in std::iter::once(shell).chain(descendants) {
+        if crate::detect::identify_agent_in_job(&foreground_job_from_entry(entry)).is_some() {
+            candidates.push(entry);
         }
     }
 
-    match candidates.len() {
-        1 => candidates
-            .pop()
-            .map(|(entry, _)| foreground_job_from_entry(entry)),
-        _ => select_single_agent_chain_candidate(&candidates, entries).map_or_else(
-            || Some(shell_job()),
-            |entry| Some(foreground_job_from_entry(entry)),
-        ),
-    }
+    let selected = select_topmost_agent_chain_candidate(&candidates, entries).unwrap_or(shell);
+    Some(foreground_job_from_entry(selected))
 }
 
 fn foreground_job_from_entry(entry: &WindowsProcessEntry) -> ForegroundJob {
@@ -341,22 +507,17 @@ fn foreground_job_from_entry(entry: &WindowsProcessEntry) -> ForegroundJob {
     }
 }
 
-fn select_single_agent_chain_candidate<'a>(
-    candidates: &[(&'a WindowsProcessEntry, crate::detect::Agent)],
+fn select_topmost_agent_chain_candidate<'a>(
+    candidates: &[&'a WindowsProcessEntry],
     entries: &[WindowsProcessEntry],
 ) -> Option<&'a WindowsProcessEntry> {
-    let (_, first_agent) = candidates.first()?;
-    if !candidates.iter().all(|(_, agent)| agent == first_agent) {
-        return None;
-    }
-
     let parent_by_pid: HashMap<u32, u32> = entries
         .iter()
         .map(|entry| (entry.pid, entry.parent_pid))
         .collect();
 
-    candidates.iter().map(|(entry, _)| *entry).find(|entry| {
-        candidates.iter().all(|(other, _)| {
+    candidates.iter().copied().find(|entry| {
+        candidates.iter().all(|other| {
             entry.pid == other.pid || process_is_ancestor(entry.pid, other.pid, &parent_by_pid)
         })
     })
@@ -690,8 +851,110 @@ pub fn read_clipboard_image() -> Option<ClipboardImage> {
     None
 }
 
-pub fn show_desktop_notification(_title: &str, _body: Option<&str>) -> std::io::Result<bool> {
-    Ok(false)
+pub fn show_desktop_notification(title: &str, body: Option<&str>) -> std::io::Result<bool> {
+    let title = title.to_owned();
+    let body = body.unwrap_or(&title).to_owned();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("herdr-windows-notification".into())
+        .spawn(move || show_desktop_notification_on_thread(&title, &body, ready_tx))?;
+    ready_rx
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|err| match err {
+            std::sync::mpsc::RecvTimeoutError::Timeout => std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Windows notification setup timed out",
+            ),
+            std::sync::mpsc::RecvTimeoutError::Disconnected => std::io::Error::other(
+                "Windows notification thread exited before reporting readiness",
+            ),
+        })?
+}
+
+fn show_desktop_notification_on_thread(
+    title: &str,
+    body: &str,
+    ready_tx: std::sync::mpsc::SyncSender<std::io::Result<bool>>,
+) {
+    let class_name = wide_null("STATIC");
+    let window_name = wide_null("Herdr notifications");
+    let hwnd = unsafe {
+        CreateWindowExW(
+            0,
+            class_name.as_ptr(),
+            window_name.as_ptr(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            std::ptr::null(),
+        )
+    };
+    if hwnd.is_null() {
+        let _ = ready_tx.send(Err(std::io::Error::last_os_error()));
+        return;
+    }
+
+    let mut notification = unsafe { std::mem::zeroed::<NOTIFYICONDATAW>() };
+    notification.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+    notification.hWnd = hwnd;
+    notification.uID = 1;
+    notification.hIcon = unsafe { LoadIconW(null_mut(), IDI_APPLICATION) };
+    notification.uFlags = NIF_TIP;
+    if !notification.hIcon.is_null() {
+        notification.uFlags |= NIF_ICON;
+    }
+    copy_wide_truncated(&mut notification.szTip, "Herdr");
+
+    if unsafe { Shell_NotifyIconW(NIM_ADD, &notification) } == 0 {
+        let _ = ready_tx.send(Err(std::io::Error::other(
+            "failed to add Herdr notification-area icon",
+        )));
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        return;
+    }
+
+    notification.uFlags = NIF_INFO;
+    notification.dwInfoFlags = NIIF_INFO | NIIF_NOSOUND;
+    copy_wide_truncated(&mut notification.szInfoTitle, title);
+    copy_wide_truncated(&mut notification.szInfo, body);
+    if unsafe { Shell_NotifyIconW(NIM_MODIFY, &notification) } == 0 {
+        unsafe {
+            Shell_NotifyIconW(NIM_DELETE, &notification);
+            DestroyWindow(hwnd);
+        }
+        let _ = ready_tx.send(Err(std::io::Error::other(
+            "failed to show Herdr desktop notification",
+        )));
+        return;
+    }
+
+    let _ = ready_tx.send(Ok(true));
+    std::thread::sleep(Duration::from_secs(10));
+    unsafe {
+        Shell_NotifyIconW(NIM_DELETE, &notification);
+        DestroyWindow(hwnd);
+    }
+}
+
+fn copy_wide_truncated<const N: usize>(destination: &mut [u16; N], value: &str) {
+    destination.fill(0);
+    let mut offset = 0;
+    for ch in value.chars() {
+        let mut units = [0; 2];
+        let encoded = ch.encode_utf16(&mut units);
+        if offset + encoded.len() >= N {
+            break;
+        }
+        destination[offset..offset + encoded.len()].copy_from_slice(encoded);
+        offset += encoded.len();
+    }
 }
 
 fn wide_null(value: &str) -> Vec<u16> {
@@ -1127,6 +1390,25 @@ mod tests {
     };
 
     #[test]
+    fn windows_notification_text_is_null_terminated_and_unicode_safe() {
+        let mut destination = [u16::MAX; 6];
+        super::copy_wide_truncated(&mut destination, "abc😀def");
+
+        assert_eq!(String::from_utf16(&destination[..5]).unwrap(), "abc😀");
+        assert_eq!(destination[5], 0);
+    }
+
+    #[test]
+    fn powershell_agent_command_omits_argument_list_when_no_arguments_are_passed() {
+        let argv = vec!["opencode".into()];
+
+        assert_eq!(
+            super::interactive_shell_command(&argv, "powershell.exe").as_deref(),
+            Some("& opencode")
+        );
+    }
+
+    #[test]
     fn cmd_agent_command_encodes_edge_arguments_without_cmd_expansion() {
         use base64::Engine as _;
 
@@ -1183,25 +1465,38 @@ mod tests {
         ];
         let inherited_path = std::env::var_os("PATH").unwrap_or_default();
         let path = format!("{};{}", base.display(), inherited_path.to_string_lossy());
+        let run_command = |shell: &str, command: &str, capture: &std::path::Path| {
+            let mut process = if shell == "cmd.exe" {
+                let mut process = Command::new("cmd.exe");
+                process.args(["/d", "/c", command]);
+                process
+            } else {
+                let mut process = Command::new("powershell.exe");
+                process.args(["-NoLogo", "-NoProfile", "-Command", command]);
+                process
+            };
+            process
+                .env("PATH", &path)
+                .env("HERDR_ARGV_CAPTURE", capture)
+                .status()
+                .unwrap()
+        };
 
         for shell in ["powershell.exe", "cmd.exe"] {
+            let no_args_capture = base.join(format!("{shell}-no-args.txt"));
+            let no_args_command = super::interactive_shell_command(&["pi".into()], shell).unwrap();
+            let status = run_command(shell, &no_args_command, &no_args_capture);
+            assert!(status.success(), "{shell} argument-free command failed");
+            assert_eq!(
+                fs::read_to_string(no_args_capture)
+                    .unwrap()
+                    .replace("\r\n", "\n"),
+                "\n\n\n\n\n\n"
+            );
+
             let capture = base.join(format!("{shell}.txt"));
             let command = super::interactive_shell_command(&argv, shell).unwrap();
-            let status = if shell == "cmd.exe" {
-                Command::new("cmd.exe")
-                    .args(["/d", "/c", &command])
-                    .env("PATH", &path)
-                    .env("HERDR_ARGV_CAPTURE", &capture)
-                    .status()
-                    .unwrap()
-            } else {
-                Command::new("powershell.exe")
-                    .args(["-NoLogo", "-NoProfile", "-Command", &command])
-                    .env("PATH", &path)
-                    .env("HERDR_ARGV_CAPTURE", &capture)
-                    .status()
-                    .unwrap()
-            };
+            let status = run_command(shell, &command, &capture);
             assert!(status.success(), "{shell} command failed");
             assert_eq!(
                 fs::read_to_string(capture).unwrap().replace("\r\n", "\n"),
@@ -1214,6 +1509,70 @@ mod tests {
 
     const CONSOLE_TEST_CHILD_ENV: &str = "HERDR_TEST_CONSOLE_CHILD_MODE";
     const CONSOLE_TEST_PARENT_PID_ENV: &str = "HERDR_TEST_CONSOLE_PARENT_PID";
+    const WMI_DAEMON_TEST_CHILD_ENV: &str = "HERDR_TEST_WMI_DAEMON_CHILD";
+
+    #[test]
+    fn windows_environment_keys_use_unicode_case_insensitive_ordering() {
+        assert_eq!(
+            super::windows_environment_key_cmp("hérdr", "HÉRDR"),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn windows_wmi_daemon_preserves_environment_and_working_directory() {
+        if let Some(capture) = std::env::var_os(WMI_DAEMON_TEST_CHILD_ENV) {
+            let cwd = std::env::current_dir().expect("WMI daemon test working directory");
+            fs::write(
+                capture,
+                format!(
+                    "{}\n{}",
+                    cwd.display(),
+                    super::current_process_is_detached_server_daemon()
+                ),
+            )
+            .expect("write WMI daemon test capture");
+            return;
+        }
+
+        let base = std::env::temp_dir().join(format!(
+            "herdr-wmi-daemon-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let capture = base.join("capture.txt");
+        let test_exe = std::env::current_exe().expect("resolve test executable");
+        let mut child = Command::new(test_exe);
+        child
+            .arg("windows_wmi_daemon_preserves_environment_and_working_directory")
+            .current_dir(&base)
+            .env(WMI_DAEMON_TEST_CHILD_ENV, &capture)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let pid = super::launch_server_daemon_with_wmi(&child)
+            .expect("launch detached process through WMI");
+        assert_ne!(pid, 0, "WMI returned an invalid process id");
+
+        let expected = format!("{}\ntrue", base.display());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if fs::read_to_string(&capture).is_ok_and(|captured| captured == expected) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "WMI daemon child did not write the expected capture"
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+        let _ = fs::remove_dir_all(base);
+    }
 
     fn console_process_ids() -> Vec<u32> {
         let mut process_ids = vec![0; 8];
@@ -1531,16 +1890,39 @@ mod tests {
     }
 
     #[test]
-    fn windows_process_tree_selects_topmost_claude_process_in_single_agent_chain() {
+    fn windows_process_tree_keeps_topmost_agent_over_different_agent_descendant() {
         let entries = vec![
             test_entry(10, 1, "powershell.exe", &["powershell.exe"]),
             test_entry(20, 10, "claude.exe", &["claude.exe"]),
-            test_entry(30, 20, "claude.exe", &["claude.exe", "mcp-server"]),
+            test_entry(
+                30,
+                20,
+                "cmd.exe",
+                &["cmd.exe", "/D", "/S", "/C", "codex mcp-server"],
+            ),
         ];
 
         let job = super::select_pane_foreground_job(10, &entries).unwrap();
 
         assert_eq!(job.process_group_id, 20);
+        assert_eq!(job.processes[0].name, "claude.exe");
+    }
+
+    #[test]
+    fn windows_process_tree_keeps_root_agent_over_agent_descendant() {
+        let entries = vec![
+            test_entry(10, 1, "claude.exe", &["claude.exe"]),
+            test_entry(
+                20,
+                10,
+                "cmd.exe",
+                &["cmd.exe", "/D", "/S", "/C", "codex mcp-server"],
+            ),
+        ];
+
+        let job = super::select_pane_foreground_job(10, &entries).unwrap();
+
+        assert_eq!(job.process_group_id, 10);
         assert_eq!(job.processes[0].name, "claude.exe");
     }
 
