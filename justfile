@@ -57,6 +57,10 @@ install-hooks:
 build:
     cargo build --release --locked
 
+# Build, adhoc-sign, and swap the local herdr binary over the installed one
+install-local:
+    scripts/install-herdr-local.sh
+
 # Build the website and documentation
 website-build:
     cd website && bun install --frozen-lockfile && bun run build
