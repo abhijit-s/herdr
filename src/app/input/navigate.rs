@@ -31,14 +31,14 @@ pub(crate) fn terminal_direct_navigation_action(
 
 pub(crate) fn terminal_direct_non_indexed_navigation_action(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
 ) -> Option<NavigateAction> {
     non_indexed_action_for_key(state, key, BindingDispatch::Direct)
 }
 
 pub(crate) fn terminal_direct_indexed_navigation_action(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
 ) -> Option<NavigateAction> {
     indexed_navigation_action(state, key, BindingDispatch::Direct)
 }
@@ -65,7 +65,7 @@ impl App {
             return;
         }
 
-        if self.state.is_prefix_key(raw_key) {
+        if self.state.is_prefix_key(&raw_key) {
             if self.state.copy_mode_pane_is_focused() {
                 self.state.cancel_copy_mode(&self.terminal_runtimes);
             }
@@ -81,20 +81,20 @@ impl App {
         }
 
         if let Some(action) =
-            non_indexed_action_for_key(&self.state, raw_key, BindingDispatch::Prefix)
+            non_indexed_action_for_key(&self.state, &raw_key, BindingDispatch::Prefix)
         {
             self.execute_prefix_key_action(action);
             return;
         }
 
-        if let Some(binding) = command_for_key(&self.state, raw_key, BindingDispatch::Prefix) {
+        if let Some(binding) = command_for_key(&self.state, &raw_key, BindingDispatch::Prefix) {
             self.cancel_copy_mode_if_active();
             self.launch_custom_command(binding, ActionContext::Prefix);
             return;
         }
 
         if let Some(action) =
-            indexed_navigation_action(&self.state, raw_key, BindingDispatch::Prefix)
+            indexed_navigation_action(&self.state, &raw_key, BindingDispatch::Prefix)
         {
             self.execute_prefix_key_action(action);
             return;
@@ -128,7 +128,7 @@ impl App {
         let key = raw_key.as_key_event();
         self.state.update_dismissed = true;
 
-        if key.code == KeyCode::Esc || self.state.is_prefix_key(raw_key) {
+        if key.code == KeyCode::Esc || self.state.is_prefix_key(&raw_key) {
             leave_navigate_mode(&mut self.state);
             return;
         }
@@ -138,7 +138,7 @@ impl App {
             .keybinds
             .navigate
             .workspace_up
-            .matches_direct_key(raw_key)
+            .matches_direct_key(&raw_key)
         {
             self.state.move_selected_workspace_by_visible_delta(-1);
             return;
@@ -148,18 +148,18 @@ impl App {
             .keybinds
             .navigate
             .workspace_down
-            .matches_direct_key(raw_key)
+            .matches_direct_key(&raw_key)
         {
             self.state.move_selected_workspace_by_visible_delta(1);
             return;
         }
 
-        if let Some(action) = navigate_reserved_action_for_key(&self.state, raw_key) {
+        if let Some(action) = navigate_reserved_action_for_key(&self.state, &raw_key) {
             self.execute_tui_navigate_action(action, ActionContext::Navigate);
             return;
         }
 
-        if let Some(action) = navigate_mode_non_indexed_action_for_key(&self.state, raw_key) {
+        if let Some(action) = navigate_mode_non_indexed_action_for_key(&self.state, &raw_key) {
             if action == NavigateAction::EditScrollback {
                 self.launch_focused_scrollback_editor();
             } else {
@@ -169,12 +169,12 @@ impl App {
             return;
         }
 
-        if let Some(binding) = command_for_key(&self.state, raw_key, BindingDispatch::Prefix) {
+        if let Some(binding) = command_for_key(&self.state, &raw_key, BindingDispatch::Prefix) {
             self.launch_custom_command(binding, ActionContext::Navigate);
             return;
         }
 
-        if let Some(action) = navigate_mode_indexed_action_for_key(&self.state, raw_key) {
+        if let Some(action) = navigate_mode_indexed_action_for_key(&self.state, &raw_key) {
             self.execute_tui_navigate_action(action, ActionContext::Navigate);
             self.selection_autoscroll_deadline = None;
         }
@@ -831,7 +831,7 @@ impl App {
             return false;
         };
 
-        let bytes = rt.encode_terminal_key(key);
+        let bytes = rt.encode_terminal_key(key.clone());
         if bytes.is_empty() || rt.try_send_bytes(Bytes::from(bytes)).is_err() {
             return false;
         }
@@ -1194,7 +1194,7 @@ pub(crate) enum BindingDispatch {
 
 pub(crate) fn command_for_key(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
     dispatch: BindingDispatch,
 ) -> Option<crate::config::CustomCommandKeybind> {
     state
@@ -1248,7 +1248,12 @@ pub(super) fn handle_navigate_reserved_key(state: &mut AppState, key: TerminalKe
         }
     }
 
-    if state.keybinds.navigate.workspace_up.matches_direct_key(key) {
+    if state
+        .keybinds
+        .navigate
+        .workspace_up
+        .matches_direct_key(&key)
+    {
         state.move_selected_workspace_by_visible_delta(-1);
         return true;
     }
@@ -1256,24 +1261,24 @@ pub(super) fn handle_navigate_reserved_key(state: &mut AppState, key: TerminalKe
         .keybinds
         .navigate
         .workspace_down
-        .matches_direct_key(key)
+        .matches_direct_key(&key)
     {
         state.move_selected_workspace_by_visible_delta(1);
         return true;
     }
-    if state.keybinds.navigate.pane_left.matches_direct_key(key) {
+    if state.keybinds.navigate.pane_left.matches_direct_key(&key) {
         state.navigate_pane(NavDirection::Left);
         return true;
     }
-    if state.keybinds.navigate.pane_down.matches_direct_key(key) {
+    if state.keybinds.navigate.pane_down.matches_direct_key(&key) {
         state.navigate_pane(NavDirection::Down);
         return true;
     }
-    if state.keybinds.navigate.pane_up.matches_direct_key(key) {
+    if state.keybinds.navigate.pane_up.matches_direct_key(&key) {
         state.navigate_pane(NavDirection::Up);
         return true;
     }
-    if state.keybinds.navigate.pane_right.matches_direct_key(key) {
+    if state.keybinds.navigate.pane_right.matches_direct_key(&key) {
         state.navigate_pane(NavDirection::Right);
         return true;
     }
@@ -1281,7 +1286,7 @@ pub(super) fn handle_navigate_reserved_key(state: &mut AppState, key: TerminalKe
     false
 }
 
-fn navigate_reserved_action_for_key(state: &AppState, key: TerminalKey) -> Option<NavigateAction> {
+fn navigate_reserved_action_for_key(state: &AppState, key: &TerminalKey) -> Option<NavigateAction> {
     let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
     if modifiers.is_empty() {
         match code {
@@ -1347,12 +1352,12 @@ pub(crate) fn handle_navigate_key(state: &mut AppState, key: KeyEvent) {
     state.update_dismissed = true;
     let terminal_key = TerminalKey::from(key);
 
-    if state.is_prefix_key(terminal_key) || key.code == KeyCode::Esc {
+    if state.is_prefix_key(&terminal_key) || key.code == KeyCode::Esc {
         leave_navigate_mode(state);
         return;
     }
 
-    if handle_navigate_reserved_key(state, terminal_key) {
+    if handle_navigate_reserved_key(state, terminal_key.clone()) {
         return;
     }
 
@@ -1441,7 +1446,7 @@ fn copy_mode_survives_prefix_action(action: NavigateAction) -> bool {
 
 fn indexed_navigation_action(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
     dispatch: BindingDispatch,
 ) -> Option<NavigateAction> {
     let kb = &state.keybinds;
@@ -1477,7 +1482,7 @@ fn indexed_navigation_action(
 
 fn action_matches(
     bindings: &crate::config::ActionKeybinds,
-    key: TerminalKey,
+    key: &TerminalKey,
     dispatch: BindingDispatch,
 ) -> bool {
     match dispatch {
@@ -1492,13 +1497,13 @@ fn action_for_key(
     key: TerminalKey,
     dispatch: BindingDispatch,
 ) -> Option<NavigateAction> {
-    non_indexed_action_for_key(state, key, dispatch)
-        .or_else(|| indexed_navigation_action(state, key, dispatch))
+    non_indexed_action_for_key(state, &key, dispatch)
+        .or_else(|| indexed_navigation_action(state, &key, dispatch))
 }
 
 fn non_indexed_action_for_key(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
     dispatch: BindingDispatch,
 ) -> Option<NavigateAction> {
     let kb = &state.keybinds;
@@ -1574,7 +1579,7 @@ fn navigate_mode_action_for_key(state: &AppState, key: TerminalKey) -> Option<Na
 
 fn navigate_mode_non_indexed_action_for_key(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
 ) -> Option<NavigateAction> {
     let action = non_indexed_action_for_key(state, key, BindingDispatch::Prefix)?;
     if matches!(
@@ -1591,7 +1596,7 @@ fn navigate_mode_non_indexed_action_for_key(
 
 fn navigate_mode_indexed_action_for_key(
     state: &AppState,
-    key: TerminalKey,
+    key: &TerminalKey,
 ) -> Option<NavigateAction> {
     indexed_navigation_action(state, key, BindingDispatch::Prefix)
 }
@@ -2769,9 +2774,9 @@ command = "echo literal"
         state.keybinds = config.keybinds();
 
         let key = TerminalKey::new(KeyCode::Char('!'), KeyModifiers::empty());
-        assert!(command_for_key(&state, key, BindingDispatch::Prefix).is_some());
+        assert!(command_for_key(&state, &key, BindingDispatch::Prefix).is_some());
         assert_eq!(
-            indexed_navigation_action(&state, key, BindingDispatch::Prefix),
+            indexed_navigation_action(&state, &key, BindingDispatch::Prefix),
             Some(NavigateAction::SwitchWorkspace(0))
         );
     }
