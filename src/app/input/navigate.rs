@@ -1063,6 +1063,7 @@ impl App {
             env,
             self.state.pane_scrollback_limit_bytes,
             self.state.host_terminal_theme,
+            self.state.host_terminal_appearance,
         )?;
         let new_pane_id = new_pane.pane_id;
         self.terminal_runtimes
@@ -1149,6 +1150,7 @@ impl App {
                 extra_env,
                 self.state.pane_scrollback_limit_bytes,
                 self.state.host_terminal_theme,
+                self.state.host_terminal_appearance,
                 true,
             );
             let (tab_idx, new_pane) = match result {
@@ -3319,6 +3321,7 @@ navigate_pane_down = "ctrl+j"
             80,
             app.state.pane_scrollback_limit_bytes,
             app.state.host_terminal_theme,
+            app.state.host_terminal_appearance,
             crate::pane::PaneShellConfig::new(&app.state.default_shell, app.state.shell_mode),
             app.event_tx.clone(),
             app.render_notify.clone(),
