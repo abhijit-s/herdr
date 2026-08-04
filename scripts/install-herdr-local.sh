@@ -133,5 +133,5 @@ RELINK="$HOME/.config/herdr/scripts/herdr-relink-plugins.sh"
 if [ -x "$RELINK" ]; then
   echo
   echo "Then relink plugins (a swap clears herdr's plugin registry):"
-  echo "    $RELINK        # or: make -C ~/.dotfiles herdr-plugins"
+  echo "    $RELINK        # or: just setup herdr-plugins (from ~/.dotfiles)"
 fi
