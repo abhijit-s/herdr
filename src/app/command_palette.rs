@@ -177,6 +177,8 @@ builtin_catalog! {
     entry RenameTab              rename_tab               "rename-tab"               "Rename the current tab";
     entry PreviousTab            previous_tab             "previous-tab"             "Switch to the previous tab";
     entry NextTab                next_tab                 "next-tab"                 "Switch to the next tab";
+    entry MoveTabPrevious        move_tab_previous        "move-tab-previous"        "Move the current tab left";
+    entry MoveTabNext            move_tab_next            "move-tab-next"            "Move the current tab right";
     entry CloseTab               close_tab                "close-tab"                "Close the current tab";
     entry RenamePane             rename_pane              "rename-pane"              "Rename the current pane";
     entry FocusPaneLeft          focus_pane_left          "focus-pane-left"          "Focus the pane to the left";
@@ -194,6 +196,10 @@ builtin_catalog! {
     entry CopyMode               copy_mode                "copy-mode"                "Enter copy mode";
     entry Zoom                   zoom                     "zoom"                     "Toggle pane zoom";
     entry EnterResizeMode        resize_mode              "resize-mode"              "Enter pane resize mode";
+    entry ResizePaneLeft         resize_pane_left         "resize-pane-left"         "Resize the pane leftward";
+    entry ResizePaneDown         resize_pane_down         "resize-pane-down"         "Resize the pane downward";
+    entry ResizePaneUp           resize_pane_up           "resize-pane-up"           "Resize the pane upward";
+    entry ResizePaneRight        resize_pane_right        "resize-pane-right"        "Resize the pane rightward";
     entry ToggleSidebar          toggle_sidebar           "toggle-sidebar"           "Toggle the sidebar";
     entry CyclePaneNext          cycle_pane_next          "cycle-pane-next"          "Cycle to the next pane";
     entry CyclePanePrevious      cycle_pane_previous      "cycle-pane-previous"      "Cycle to the previous pane";

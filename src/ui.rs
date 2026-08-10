@@ -98,7 +98,7 @@ pub(crate) use self::{
     },
     panes::{apply_pane_chrome, pane_inner_rect, pane_is_scrolled_back},
     tab_surface::{tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceView},
-    tabs::compute_tab_bar_view,
+    tabs::{compute_tab_bar_view, tab_bar_content_area},
     widgets::{centered_popup_rect, modal_stack_areas},
 };
 use crate::app::state::ViewLayout;
@@ -263,20 +263,23 @@ fn compute_view_internal(
         compute_workspace_card_areas(app, sidebar_area)
     };
 
-    // Reserve the status strip's budget on the right edge before laying out
-    // tabs, so the tabs zone flexes into the remainder (KTD4). The tabs zone's
-    // existing scroll-arrow overflow handles crowding first.
-    let status_strip_rect = if tab_bar_rect.width > 0 && app.status_strip.is_enabled() {
+    // Upstream reserves the tab-bar-right entries (zoom/hostname/datetime/
+    // command) at the far right edge first, then the fork's status strip nests
+    // inside the remaining content area so both right-edge decorations coexist
+    // without overlapping (KTD4). The tabs zone flexes into whatever remains and
+    // its existing scroll-arrow overflow handles crowding first.
+    let content_area = tab_bar_content_area(app, tab_bar_rect);
+    let status_strip_rect = if content_area.width > 0 && app.status_strip.is_enabled() {
         let text = app
             .status_strip
-            .render_line_with_slots(tab_bar_rect.width as usize, &app.status_slots);
-        let strip_w = (UnicodeWidthStr::width(text.as_str()) as u16).min(tab_bar_rect.width);
+            .render_line_with_slots(content_area.width as usize, &app.status_slots);
+        let strip_w = (UnicodeWidthStr::width(text.as_str()) as u16).min(content_area.width);
         if strip_w == 0 {
             Rect::default()
         } else {
             Rect::new(
-                tab_bar_rect.x + tab_bar_rect.width - strip_w,
-                tab_bar_rect.y,
+                content_area.x + content_area.width - strip_w,
+                content_area.y,
                 strip_w,
                 1,
             )
@@ -288,13 +291,13 @@ fn compute_view_internal(
         // One-column gap between the tabs zone and the strip.
         let reserved = status_strip_rect.width.saturating_add(1);
         Rect::new(
-            tab_bar_rect.x,
-            tab_bar_rect.y,
-            tab_bar_rect.width.saturating_sub(reserved),
-            tab_bar_rect.height,
+            content_area.x,
+            content_area.y,
+            content_area.width.saturating_sub(reserved),
+            content_area.height,
         )
     } else {
-        tab_bar_rect
+        content_area
     };
 
     let tab_bar_view = app
