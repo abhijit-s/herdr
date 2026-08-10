@@ -88,6 +88,14 @@ fn tab_bar_status_width(app: &AppState) -> u16 {
 }
 
 fn tab_bar_status_area(app: &AppState, area: Rect) -> Option<Rect> {
+    // The fork status strip and tab_bar_right both decorate the tab bar's right
+    // edge. When the fork strip is enabled it wins that edge, so reserve and
+    // draw nothing here to avoid double-stacking; the strip nests into the full
+    // content area instead. This is the single reservation/draw gate for the
+    // tab_bar_right zone (feeds both tab_bar_content_area and render).
+    if app.status_strip.is_enabled() {
+        return None;
+    }
     let width = tab_bar_status_width(app);
     if width == 0 {
         return None;
@@ -685,6 +693,35 @@ mod tests {
         );
         assert!(view.tab_hit_areas[0].width > 0);
         assert!(view.new_tab_hit_area.width > 0);
+    }
+
+    fn enabled_status_strip() -> crate::ui::status_right::StatusStripState {
+        crate::ui::status_right::StatusStripState::from_config(&crate::config::StatusConfig {
+            status_right: "READY".into(),
+            status_right_length: 20,
+            status_interval: 5,
+        })
+    }
+
+    #[test]
+    fn fork_status_strip_suppresses_tab_bar_right_reservation() {
+        let mut app = AppState::test_new();
+        app.tab_bar_right = vec![crate::app::state::TabBarStatusSegment::Text(Some(
+            "14:30".into(),
+        ))];
+        app.workspaces = vec![Workspace::test_new("test")];
+        app.active = Some(0);
+        let rect = Rect::new(0, 0, 60, 1);
+
+        // Fork strip disabled: tab_bar_right reserves its right-edge zone.
+        assert!(tab_bar_status_area(&app, rect).is_some());
+        assert!(tab_bar_content_area(&app, rect).width < rect.width);
+
+        // Fork strip enabled: it wins the edge, so tab_bar_right reserves
+        // nothing and the content area spans the full tab bar.
+        app.status_strip = enabled_status_strip();
+        assert_eq!(tab_bar_status_area(&app, rect), None);
+        assert_eq!(tab_bar_content_area(&app, rect), rect);
     }
 
     #[test]

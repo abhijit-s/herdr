@@ -8,6 +8,8 @@
 //! `render`; both run on the server interval tick (KTD6).
 
 use std::collections::HashMap;
+use std::io::Read;
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use ratatui::style::{Color, Modifier, Style};
@@ -22,6 +24,20 @@ const MAX_SEGMENT_CHARS: usize = 256;
 
 /// Ellipsis appended when a lone oversize segment is truncated (KTD4).
 const ELLIPSIS: char = '…';
+
+/// Hard cap on how long a status `#(command)` may run before it is killed and
+/// abandoned. Without it a hung command blocks its worker thread forever and
+/// leaves the slot's `in_flight` flag stuck, so the command never re-runs. On
+/// expiry the child is killed/reaped and the failure clears `in_flight`, so the
+/// command re-arms on the next interval. Kept a constant (not a config field)
+/// to avoid adding a documented+translated `StatusConfig` field for a value
+/// that matches the tab_bar_right default; 2s mirrors that lane.
+const STATUS_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Poll granularity while waiting for a status command to exit within
+/// [`STATUS_COMMAND_TIMEOUT`]. Small enough to reap promptly, coarse enough to
+/// stay negligible against the timeout.
+const STATUS_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// A tmux-style `#[…]` style directive: the fg/bg/modifiers it sets for the
 /// segments that follow it, plus a `reset` flag for `#[default]`/`#[none]`.
@@ -846,16 +862,52 @@ pub(crate) fn spawn_status_command(
     event_tx: tokio::sync::mpsc::Sender<crate::events::AppEvent>,
 ) {
     std::thread::spawn(move || {
-        let result = match crate::platform::detached_custom_command_process(&command).output() {
-            Ok(output) if output.status.success() => {
-                Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-            }
-            Ok(output) => Err(format!("exit status {:?}", output.status.code())),
-            Err(err) => Err(err.to_string()),
-        };
+        let result = run_status_command(&command, STATUS_COMMAND_TIMEOUT);
         let _ = event_tx
             .blocking_send(crate::events::AppEvent::StatusCommandFinished { command, result });
     });
+}
+
+/// Run one `#(command)` to completion or `timeout`, whichever comes first,
+/// returning its captured stdout on success. On timeout the child is killed and
+/// reaped so neither the process nor this worker thread leaks; the resulting
+/// error clears the slot's `in_flight` flag so the command re-arms next
+/// interval. Holds the [`std::process::Child`] and polls `try_wait` rather than
+/// blocking on `.output()`, which cannot be interrupted.
+fn run_status_command(command: &str, timeout: Duration) -> Result<String, String> {
+    let mut child = crate::platform::detached_custom_command_process(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| err.to_string())?;
+
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("timed out after {}s", timeout.as_secs()));
+                }
+                std::thread::sleep(STATUS_COMMAND_POLL_INTERVAL);
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    };
+
+    if !status.success() {
+        return Err(format!("exit status {:?}", status.code()));
+    }
+    // The child exited within the timeout, so its stdout fit the pipe buffer and
+    // draining it now cannot deadlock. Stay lossy on non-UTF-8 like `.output()`.
+    let mut buf = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut buf).map_err(|err| err.to_string())?;
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 #[cfg(test)]
@@ -1164,6 +1216,47 @@ mod tests {
             strip.due_commands(now + Duration::from_secs(6)),
             vec!["cpu.sh".to_string()]
         );
+    }
+
+    #[test]
+    fn timed_out_command_clears_in_flight_and_rearms() {
+        // A timeout surfaces as an Err result. It must clear the in-flight flag
+        // (so the command is not wedged) and, once the interval elapses, become
+        // due again — the whole point of bounding command execution.
+        let now = Instant::now();
+        let mut strip = build("#(cpu.sh)"); // status_interval: 5
+        strip.mark_command_started("cpu.sh", now);
+        assert!(strip.due_commands(now).is_empty(), "should be in flight");
+        assert!(!strip.apply_command_result("cpu.sh", Err("timed out after 2s".into())));
+        // Cleared but not yet due within the interval.
+        assert!(strip.due_commands(now + Duration::from_secs(1)).is_empty());
+        // Re-arms once the interval elapses from the start.
+        assert_eq!(
+            strip.due_commands(now + Duration::from_secs(6)),
+            vec!["cpu.sh".to_string()]
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn hung_command_is_killed_at_the_timeout() {
+        // A command that never exits must be killed at the deadline rather than
+        // block its worker thread forever. Uses a short timeout to stay fast.
+        let start = Instant::now();
+        let result = run_status_command("sleep 30", Duration::from_millis(150));
+        assert!(result.is_err(), "expected a timeout error, got {result:?}");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "timeout did not fire promptly: {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn fast_command_returns_stdout_before_the_timeout() {
+        let result = run_status_command("printf hi", Duration::from_secs(2));
+        assert_eq!(result.as_deref(), Ok("hi"));
     }
 
     #[test]
