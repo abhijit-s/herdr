@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::Config;
+use super::{Config, DEFAULT_RESIZE_STEP, MAX_RESIZE_STEP};
 use crate::input::TerminalKey;
 use crate::popup_size::PopupSize;
 
@@ -366,6 +366,8 @@ pub struct Keybinds {
     pub resize_pane_down: ActionKeybinds,
     pub resize_pane_up: ActionKeybinds,
     pub resize_pane_right: ActionKeybinds,
+    /// Split-ratio fraction one resize keypress moves the divider.
+    pub resize_step: f32,
     pub toggle_sidebar: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
 }
@@ -535,6 +537,7 @@ impl Config {
             resize_pane_down: empty_action!(),
             resize_pane_up: empty_action!(),
             resize_pane_right: empty_action!(),
+            resize_step: resolve_resize_step(self.keys.resize_step, &mut diagnostics),
             toggle_sidebar: empty_action!(),
             custom_commands: Vec::new(),
         };
@@ -724,6 +727,22 @@ impl Config {
 
         (prefix_diag, prefix, diagnostics, keybinds)
     }
+}
+
+/// A resize step is a fraction of the containing split's ratio, so it must stay
+/// inside (0, MAX_RESIZE_STEP]. Anything else falls back to the default rather
+/// than resizing by zero or vaulting the divider past the pane in one press.
+fn resolve_resize_step(step: f32, diagnostics: &mut Vec<String>) -> f32 {
+    if step.is_finite() && step > 0.0 && step <= MAX_RESIZE_STEP {
+        return step;
+    }
+
+    let diag = format!(
+        "invalid keys.resize_step = {step}; expected a fraction in (0, {MAX_RESIZE_STEP}]; using {DEFAULT_RESIZE_STEP}"
+    );
+    warn!(message = %diag, "config diagnostic");
+    diagnostics.push(diag);
+    DEFAULT_RESIZE_STEP
 }
 
 fn reserve_navigate_runtime_keys(registry: &mut BindingRegistry) {
@@ -1634,6 +1653,44 @@ next_tab = "prefix+n"
     fn back_and_forth_keybinds_are_unset_by_default() {
         let kb = Config::default().keybinds();
         assert!(kb.last_pane.bindings.is_empty());
+    }
+
+    #[test]
+    fn resize_step_defaults_to_five_percent() {
+        assert_eq!(Config::default().keybinds().resize_step, DEFAULT_RESIZE_STEP);
+    }
+
+    #[test]
+    fn resize_step_honors_configured_value() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+resize_step = 0.15
+"#,
+        )
+        .unwrap();
+        assert!(config.collect_diagnostics().is_empty());
+        assert!((config.keybinds().resize_step - 0.15).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn out_of_range_resize_step_falls_back_with_diagnostic() {
+        for value in ["0.0", "-0.1", "0.9", "nan"] {
+            let config: Config =
+                toml::from_str(&format!("[keys]\nresize_step = {value}\n")).unwrap();
+            assert_eq!(
+                config.keybinds().resize_step,
+                DEFAULT_RESIZE_STEP,
+                "{value} should fall back to the default"
+            );
+            assert!(
+                config
+                    .collect_diagnostics()
+                    .iter()
+                    .any(|diag| diag.contains("invalid keys.resize_step")),
+                "{value} should report a diagnostic"
+            );
+        }
     }
 
     #[test]

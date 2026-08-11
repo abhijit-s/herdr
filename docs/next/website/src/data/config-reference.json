@@ -560,6 +560,12 @@
           "description": "Resize the focused pane toward the right. Unset by default."
         },
         {
+          "key": "keys.resize_step",
+          "type": "float",
+          "default": "0.05",
+          "description": "Fraction of the containing split that one resize keypress moves the divider. Applies to resize mode and the resize_pane_* bindings alike. Must be in (0, 0.5]; out-of-range values fall back to the default."
+        },
+        {
           "key": "keys.toggle_sidebar",
           "type": "keybinding",
           "default": "\"prefix+b\"",

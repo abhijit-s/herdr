@@ -1226,7 +1226,7 @@ impl App {
                 crate::api::schema::PaneResizeParams {
                     pane_id: None,
                     direction: super::navigate::api_pane_direction(direction),
-                    amount: None,
+                    amount: Some(self.state.keybinds.resize_step),
                 },
             );
         }

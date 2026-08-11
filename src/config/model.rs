@@ -12,6 +12,12 @@ use super::{
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
 
+/// Split-ratio fraction one resize keypress moves the divider.
+pub const DEFAULT_RESIZE_STEP: f32 = 0.05;
+/// Largest fraction a single resize keypress may move; a bigger step would let
+/// one press jump a divider across the pane it is meant to nudge.
+pub const MAX_RESIZE_STEP: f32 = 0.5;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannelConfig {
@@ -516,6 +522,8 @@ pub struct KeysConfig {
     pub resize_pane_up: BindingConfig,
     /// Resize the focused pane toward the right. Unset by default.
     pub resize_pane_right: BindingConfig,
+    /// Split-ratio fraction one resize keypress moves the divider. Default: 0.05.
+    pub resize_step: f32,
     /// Toggle sidebar collapse. Default: "prefix+b"
     pub toggle_sidebar: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
@@ -649,6 +657,8 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     resize_pane_right: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    resize_step: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     toggle_sidebar: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     indexed: Option<IndexedKeysConfig>,
@@ -732,6 +742,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(resize_pane_down);
         apply_field!(resize_pane_up);
         apply_field!(resize_pane_right);
+        apply_field!(resize_step);
         apply_field!(toggle_sidebar);
         apply_field!(indexed);
         apply_field!(command);
@@ -837,6 +848,7 @@ impl KeysConfig {
         copy_effective_action_field!(resize_pane_down, keybinds.resize_pane_down);
         copy_effective_action_field!(resize_pane_up, keybinds.resize_pane_up);
         copy_effective_action_field!(resize_pane_right, keybinds.resize_pane_right);
+        copy_user_field!(resize_step);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
         copy_user_field!(indexed);
 
@@ -1141,6 +1153,7 @@ impl Default for KeysConfig {
             resize_pane_down: BindingConfig::empty(),
             resize_pane_up: BindingConfig::empty(),
             resize_pane_right: BindingConfig::empty(),
+            resize_step: DEFAULT_RESIZE_STEP,
             toggle_sidebar: BindingConfig::one("prefix+b"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),

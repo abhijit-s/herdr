@@ -219,6 +219,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_down = ""   # optional, e.g. "ctrl+shift+alt+down"
 # resize_pane_up = ""     # optional, e.g. "ctrl+shift+alt+up"
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
+# Fraction of the containing split one resize keypress moves the divider.
+# Applies to resize mode and the resize_pane_* bindings alike. Range: (0, 0.5].
+# resize_step = 0.05
 # toggle_sidebar = "prefix+b"
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.

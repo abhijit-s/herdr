@@ -411,9 +411,9 @@ impl App {
         let amount = params
             .amount
             .filter(|amount| amount.is_finite())
-            .unwrap_or(0.05)
+            .unwrap_or(crate::config::DEFAULT_RESIZE_STEP)
             .abs()
-            .min(0.5);
+            .min(crate::config::MAX_RESIZE_STEP);
         let direction: NavDirection = params.direction.into();
         let area = self.state.view.terminal_area;
         let changed = self
