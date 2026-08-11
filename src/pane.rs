@@ -446,6 +446,23 @@ fn should_skip_process_probe_for_lifecycle_authority(
         && !foreground_group_changed(input.foreground_pgid, input.last_foreground_pgid)
 }
 
+#[cfg(any(windows, test))]
+fn should_observe_foreground_process_group(
+    lifecycle_authority: bool,
+    content_changed: bool,
+    elapsed: std::time::Duration,
+    input: ProcessProbeInput,
+) -> bool {
+    !input.has_process_probe
+        || input.current_agent.is_none()
+        || input.suppressed_agent.is_some()
+        || input.pending_foreground_shell_clear
+        || input.pending_restore_probe
+        || content_changed
+        || (lifecycle_authority && elapsed >= PROCESS_RECHECK_IDENTIFIED)
+        || (!lifecycle_authority && input.elapsed_since_process_check >= PROCESS_RECHECK_IDENTIFIED)
+}
+
 fn should_probe_foreground_job(input: ProcessProbeInput) -> bool {
     if input.pending_foreground_shell_clear || input.pending_restore_probe {
         return true;
@@ -2156,6 +2173,8 @@ impl PaneRuntime {
                 let mut state = AgentState::Idle;
                 let mut last_visible_idle = initial_state.detected_agent.is_some();
                 let mut last_process_check = Instant::now();
+                #[cfg(windows)]
+                let mut last_observation = (Instant::now(), Some(0));
                 let mut last_foreground_pgid = None;
                 let mut has_process_probe = false;
                 let mut acquisition_started_at = None;
@@ -2224,23 +2243,50 @@ impl PaneRuntime {
                     let mut agent = agent_presence.current_agent();
                     let lifecycle_authority_active =
                         full_lifecycle_authority_active_for_task.load(Ordering::Acquire);
-                    let foreground_pgid = (pid > 0)
-                        .then(|| detect::foreground_process_group_id(pid))
-                        .flatten();
+                    let process_probe_input = ProcessProbeInput {
+                        current_agent: agent,
+                        suppressed_agent,
+                        foreground_pgid: last_foreground_pgid,
+                        last_foreground_pgid,
+                        has_process_probe,
+                        acquisition_age: acquisition_started_at
+                            .map(|started| now.duration_since(started)),
+                        pending_foreground_shell_clear,
+                        pending_restore_probe,
+                        elapsed_since_process_check: now.duration_since(last_process_check),
+                    };
+                    #[cfg(windows)]
+                    let content_seq = detection_content_seq.load(Ordering::Relaxed);
+                    #[cfg(windows)]
+                    let last_content_seq = last_observation.1;
+                    #[cfg(windows)]
+                    let foreground_observation_due = should_observe_foreground_process_group(
+                        lifecycle_authority_active,
+                        last_content_seq != Some(content_seq)
+                            && (last_content_seq.is_some()
+                                || now.duration_since(last_observation.0) >= TICK_IDENTIFIED),
+                        now.duration_since(last_observation.0),
+                        process_probe_input,
+                    );
+                    #[cfg(not(windows))]
+                    let foreground_observation_due = true;
+                    let foreground_pgid = match (pid, foreground_observation_due) {
+                        (0, _) => None,
+                        (_, true) => detect::foreground_process_group_id(pid),
+                        _ => last_foreground_pgid,
+                    };
+                    #[cfg(windows)]
+                    if pid > 0 && foreground_observation_due {
+                        let retry =
+                            last_content_seq.is_some() && last_content_seq != Some(content_seq);
+                        last_observation = (now, (!retry).then_some(content_seq));
+                    }
                     let process_group_changed =
                         foreground_group_changed(foreground_pgid, last_foreground_pgid);
                     let should_check_process = pid > 0 && {
                         let process_probe_input = ProcessProbeInput {
-                            current_agent: agent,
-                            suppressed_agent,
                             foreground_pgid,
-                            last_foreground_pgid,
-                            has_process_probe,
-                            acquisition_age: acquisition_started_at
-                                .map(|started| now.duration_since(started)),
-                            pending_foreground_shell_clear,
-                            pending_restore_probe,
-                            elapsed_since_process_check: now.duration_since(last_process_check),
+                            ..process_probe_input
                         };
                         !should_skip_process_probe_for_lifecycle_authority(
                             lifecycle_authority_active,
@@ -3792,6 +3838,69 @@ mod tests {
             pending_foreground_shell_clear: false,
             pending_restore_probe: false,
             elapsed_since_process_check: std::time::Duration::from_secs(1),
+        }
+    }
+
+    #[test]
+    fn windows_foreground_observation_schedule_preserves_lifecycle_checks() {
+        let quiet = ProcessProbeInput {
+            current_agent: Some(Agent::Codex),
+            ..process_probe_input()
+        };
+        let before_safety_bound = PROCESS_RECHECK_IDENTIFIED - std::time::Duration::from_millis(1);
+        let content_retry = std::time::Duration::from_millis(300);
+        let observe = |lifecycle, content_changed, elapsed, input| {
+            should_observe_foreground_process_group(lifecycle, content_changed, elapsed, input)
+        };
+        let content_due = |last: Option<u64>, current, elapsed| {
+            last != Some(current) && (last.is_some() || elapsed >= content_retry)
+        };
+
+        assert!(!observe(false, false, before_safety_bound, quiet));
+        assert!(observe(false, true, before_safety_bound, quiet));
+        assert!(observe(true, true, before_safety_bound, quiet));
+        assert!(content_due(Some(0), 1, std::time::Duration::ZERO));
+        assert!(!content_due(
+            None,
+            1,
+            content_retry - std::time::Duration::from_millis(1)
+        ));
+        assert!(content_due(None, 1, content_retry));
+        assert!(observe(
+            false,
+            false,
+            before_safety_bound,
+            ProcessProbeInput {
+                elapsed_since_process_check: PROCESS_RECHECK_IDENTIFIED,
+                ..quiet
+            }
+        ));
+        assert!(observe(true, false, PROCESS_RECHECK_IDENTIFIED, quiet));
+
+        for immediate in [
+            ProcessProbeInput {
+                has_process_probe: false,
+                ..quiet
+            },
+            ProcessProbeInput {
+                current_agent: None,
+                acquisition_age: Some(std::time::Duration::ZERO),
+                ..quiet
+            },
+            ProcessProbeInput {
+                pending_restore_probe: true,
+                ..quiet
+            },
+            ProcessProbeInput {
+                suppressed_agent: Some(Agent::Codex),
+                ..quiet
+            },
+            ProcessProbeInput {
+                pending_foreground_shell_clear: true,
+                ..quiet
+            },
+        ] {
+            assert!(observe(false, false, std::time::Duration::ZERO, immediate));
         }
     }
 

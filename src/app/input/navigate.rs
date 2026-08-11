@@ -2905,6 +2905,39 @@ resize_pane_left = "prefix+shift+left"
     }
 
     #[test]
+    fn shifted_backslash_layout_prefers_horizontal_split_binding() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+split_vertical = "prefix+|"
+split_horizontal = 'prefix+\'
+"#,
+        )
+        .unwrap();
+        let mut state = state_with_workspaces(&["test"]);
+        state.keybinds = config.keybinds();
+        let key = crate::input::parse_terminal_key_sequence("\x1b[124:92;2:1u").unwrap();
+        assert_eq!(key.code, KeyCode::Char('|'));
+        assert_eq!(key.modifiers, KeyModifiers::SHIFT);
+        assert_eq!(key.shifted_codepoint, Some('\\' as u32));
+        assert!(state.keybinds.split_horizontal.matches_prefix_key(&key));
+        assert!(!state.keybinds.split_vertical.matches_prefix_key(&key));
+
+        assert_eq!(
+            action_for_key(&state, key, BindingDispatch::Prefix),
+            Some(NavigateAction::SplitHorizontal)
+        );
+        assert_eq!(
+            action_for_key(
+                &state,
+                TerminalKey::new(KeyCode::Char('|'), KeyModifiers::empty()),
+                BindingDispatch::Prefix,
+            ),
+            Some(NavigateAction::SplitVertical)
+        );
+    }
+
+    #[test]
     fn prefix_tab_override_can_map_to_last_pane() {
         let config: Config = toml::from_str(
             r#"
