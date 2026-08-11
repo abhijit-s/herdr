@@ -216,6 +216,28 @@ async fn publish_state_changed_event(
     }
 }
 
+async fn publish_agent_process_detected_event(
+    state_events: mpsc::Sender<AppEvent>,
+    pane_id: PaneId,
+    agent: Agent,
+    observed_at: std::time::Instant,
+) {
+    if let Err(e) = state_events
+        .send(AppEvent::AgentProcessDetected {
+            pane_id,
+            agent,
+            observed_at,
+        })
+        .await
+    {
+        warn!(
+            pane = pane_id.raw(),
+            err = %e,
+            "failed to deliver AgentProcessDetected event"
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AgentDetectionPublishUpdate {
     state: AgentState,
@@ -792,21 +814,17 @@ fn spawn_basic_detection_task(
                         // A new foreground agent must not inherit OSC
                         // title/progress evidence from the previous process.
                         terminal.clear_agent_osc_state();
-                        if agent.is_some() {
+                        if let Some(agent) = agent {
                             agent_startup_grace_until = Some(now + AGENT_STARTUP_GRACE_WINDOW);
-                            state = AgentState::Idle;
-                            last_visible_idle = true;
+                            state = AgentState::Unknown;
+                            last_visible_idle = false;
                             last_visible_blocker = false;
                             last_visible_working = false;
                             last_visible_signal_refresh = None;
-                            publish_state_changed_event(
+                            publish_agent_process_detected_event(
                                 state_events.clone(),
                                 pane_id,
                                 agent,
-                                AgentState::Idle,
-                                false,
-                                false,
-                                false,
                                 now,
                             )
                             .await;
@@ -1899,7 +1917,10 @@ impl PaneRuntime {
                     terminal.process_pty_bytes(pane_id, shell_pid, bytes, &response_writer);
                 publish_terminal_bells(pane_id, result.terminal_bells, &read_events);
                 observe_detection_content_change(bytes, &detection_content_seq);
-                if result.request_render && render_dirty.request_pty(pane_id) {
+                let title_requested =
+                    result.terminal_title_changed && render_dirty.request_terminal_title(pane_id);
+                let render_requested = result.request_render && render_dirty.request_pty(pane_id);
+                if title_requested || render_requested {
                     render_notify.notify_one();
                 }
                 if let Some(delay) = result.render_delay {
@@ -2062,7 +2083,10 @@ impl PaneRuntime {
                 if agent_detection == AgentDetection::Enabled {
                     observe_detection_content_change(bytes, &detection_content_seq);
                 }
-                if result.request_render && render_dirty.request_pty(pane_id) {
+                let title_requested =
+                    result.terminal_title_changed && render_dirty.request_terminal_title(pane_id);
+                let render_requested = result.request_render && render_dirty.request_pty(pane_id);
+                if title_requested || render_requested {
                     render_notify.notify_one();
                 }
                 if let Some(delay) = result.render_delay {
@@ -2287,22 +2311,18 @@ impl PaneRuntime {
                                     // A new foreground agent must not inherit OSC
                                     // title/progress evidence from the previous process.
                                     terminal.clear_agent_osc_state();
-                                    if agent.is_some() {
+                                    if let Some(agent) = agent {
                                         agent_startup_grace_until =
                                             Some(now + AGENT_STARTUP_GRACE_WINDOW);
-                                        state = AgentState::Idle;
-                                        last_visible_idle = true;
+                                        state = AgentState::Unknown;
+                                        last_visible_idle = false;
                                         last_visible_blocker = false;
                                         last_visible_working = false;
                                         last_visible_signal_refresh = None;
-                                        publish_state_changed_event(
+                                        publish_agent_process_detected_event(
                                             state_events.clone(),
                                             pane_id,
                                             agent,
-                                            AgentState::Idle,
-                                            false,
-                                            false,
-                                            false,
                                             now,
                                         )
                                         .await;
