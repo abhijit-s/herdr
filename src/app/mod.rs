@@ -8,6 +8,7 @@ pub(crate) mod actions;
 mod agent_resume;
 pub(crate) mod agent_view;
 mod agents;
+pub(crate) use agents::{AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
 mod api;
 mod api_helpers;
 pub(crate) mod command_palette;
@@ -628,8 +629,8 @@ impl App {
                 split_borders: Vec::new(),
             },
             drag: None,
-            workspace_press: None,
-            tab_press: None,
+            workspace_presses: HashMap::new(),
+            tab_presses: HashMap::new(),
             selection: None,
             selection_autoscroll: None,
             context_menu: None,

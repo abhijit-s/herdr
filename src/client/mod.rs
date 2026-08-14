@@ -1721,8 +1721,8 @@ async fn run_client_loop(
                                     len,
                                 )
                                 .is_ok()
+                                    && direct_graphics::valid_control(&control, image_id, len)
                             })
-                            && direct_graphics::valid_control(&control, image_id)
                             && state
                                 .direct_graphics_response
                                 .lock()
