@@ -139,6 +139,7 @@ pre-release-check:
     just release-docs-check
     just bench-render-scale
     @echo "release review required: investigate material render-scaling regressions before publishing."
+    @echo "release review required: verify skills/herdr/SKILL.md matches the current CLI, IDs, agent lifecycle semantics, and safety guidance."
 
 # Prepare the release commit without tagging or pushing (usage: just release-prepare 0.1.1)
 release-prepare version:

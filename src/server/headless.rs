@@ -278,6 +278,7 @@ struct AltScreenReadSpec {
     lines: usize,
     unwrap: bool,
     initial: crate::terminal::ScreenSnapshot,
+    content_seq: u64,
 }
 
 enum AltScreenReadConflict {
@@ -3417,7 +3418,7 @@ impl HeadlessServer {
         if runtime.wheel_routing() != Some(crate::pane::WheelRouting::MouseReport) {
             return None;
         }
-        let (screen, initial) = runtime.screen_text_snapshot()?;
+        let (screen, initial, content_seq) = runtime.screen_text_snapshot_with_seq()?;
         if screen != crate::ghostty::ActiveScreen::Alternate || initial.rows.len() >= lines {
             return None;
         }
@@ -3426,6 +3427,7 @@ impl HeadlessServer {
             lines,
             unwrap: source == ReadSource::RecentUnwrapped,
             initial,
+            content_seq,
         })
     }
 
@@ -3777,6 +3779,7 @@ impl HeadlessServer {
                         spec.lines,
                         spec.unwrap,
                         spec.initial,
+                        spec.content_seq,
                         Instant::now(),
                     );
                     self.pending_alt_screen_reads.push(pending);
@@ -6643,6 +6646,7 @@ next_tab = ""
                         cols: 80,
                         rows: Vec::new(),
                     },
+                    0,
                     Instant::now(),
                 ),
             );

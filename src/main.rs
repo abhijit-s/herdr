@@ -130,6 +130,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#rrggbb), named colors, rgb(r,g,b), or panel_bg = "reset"
 # [theme.custom]
 # sidebar_bg = "#181825"
+# active_row_bg = "#313244"
 # panel_bg = "reset"
 # accent = "#f5c2e7"
 # red = "#ff6188"
@@ -732,7 +733,8 @@ fn main() -> io::Result<()> {
         println!("Logs:   {}", logging::help_log_paths_summary());
         println!("Env:    HERDR_CONFIG_PATH overrides config file path");
         println!("Home:   https://herdr.dev");
-        println!("Skill:  herdr --skill prints agent instructions for driving herdr from a pane");
+        println!();
+        println!("{}", cli::AGENT_HELP_FOOTER);
         return Ok(());
     }
 

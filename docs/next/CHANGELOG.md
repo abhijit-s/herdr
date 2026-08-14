@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- CLI help now points coding agents to Herdr's plain-text guide, documentation index, and built-in control skill.
 - Added Qwen Code detection for idle, working, and user-confirmation states, plus optional native session restore.
 - Herdr now keeps the outer terminal window title in sync with the session through `ui.window_title`, so window managers and terminal tab bars show the active workspace and the host the panes actually run on.
 - The desktop tab bar now has configurable right-aligned status entries for zoom state, hostname, date/time, literal text, and asynchronously refreshed command output.
@@ -20,6 +21,8 @@
 - Experimental pane graphics now support bounded named layers, acknowledged full-RGBA primary-layer direct file frames on audited local terminals, owned BGRA fallback, exact pixel mouse input, and placement-only resize replay.
 
 ### Fixed
+- Qwen Code panes now use locale-independent terminal-title states and localized confirmation fallbacks, preventing active or blocked turns from appearing idle. (#2756)
+- Active Space and Agent rows now use dedicated theme colors that remain visible when the host terminal background matches the selected Herdr theme. (#2792)
 - `agent prompt` now rejects agents already waiting at approval or question dialogs with `agent_blocked`, without sending text or Enter. (#2788)
 - `prefix+e` now preserves logical lines when opening soft-wrapped scrollback in an editor. (#2733)
 - Tab bar clicks are now properly registered when using Ghostty in native fullscreen. (#796, #2736, thanks @HackAttack)
