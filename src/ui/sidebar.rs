@@ -788,14 +788,14 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         let is_selected = visible_idx == app.selected && is_navigating;
         let is_active = Some(visible_idx) == app.active;
         let row_style = if is_selected {
-            Style::default().bg(p.surface0)
+            Style::default().bg(p.selection_bg)
         } else if is_active {
             Style::default().bg(p.active_row_bg)
         } else {
             Style::default()
         };
         let num_style = if is_selected {
-            Style::default().fg(p.overlay1).bg(p.surface0)
+            Style::default().fg(p.overlay1).bg(p.selection_bg)
         } else if is_active {
             Style::default().fg(p.text).bg(p.active_row_bg)
         } else {
@@ -1248,7 +1248,7 @@ fn render_workspace_list(
 
         if highlighted {
             let bg = if selected {
-                p.surface0
+                p.selection_bg
             } else if is_dragged {
                 p.surface1
             } else {
@@ -1779,8 +1779,8 @@ rows = [[{ token = "workspace", bold = false }, { token = "agent", dim = false }
         );
         assert_eq!(
             buffer[(0, selected_row)].bg,
-            app.palette.surface0,
-            "navigate selection should keep its existing surface0 background"
+            app.palette.selection_bg,
+            "navigate selection should use its dedicated cursor background"
         );
     }
 
