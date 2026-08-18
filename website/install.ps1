@@ -372,6 +372,40 @@ function Test-HerdrReleaseComplete {
     return $true
 }
 
+function Move-DirectoryWithRetry {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [int]$TimeoutMilliseconds = 5000
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while ($true) {
+        try {
+            [System.IO.Directory]::Move($Source, $Destination)
+            return
+        } catch {
+            $retryable = $false
+            $exception = $_.Exception
+            while ($null -ne $exception) {
+                if ($exception -is [System.IO.IOException] -or
+                    $exception -is [System.UnauthorizedAccessException]) {
+                    $retryable = $true
+                    break
+                }
+                $exception = $exception.InnerException
+            }
+            if (-not $retryable -or
+                [DateTime]::UtcNow -ge $deadline -or
+                -not (Test-Path -LiteralPath $Source -PathType Container) -or
+                (Test-Path -LiteralPath $Destination)) {
+                throw
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+}
+
 function Invoke-WithInstallLock {
     param(
         [string]$LockPath,
@@ -668,7 +702,7 @@ try {
                 [System.IO.Directory]::Move($releaseDir, $backupDir)
             }
             try {
-                [System.IO.Directory]::Move($stagingDir, $releaseDir)
+                Move-DirectoryWithRetry -Source $stagingDir -Destination $releaseDir
             } catch {
                 if ($null -ne $backupDir -and -not (Test-Path -LiteralPath $releaseDir)) {
                     [System.IO.Directory]::Move($backupDir, $releaseDir)

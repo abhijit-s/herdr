@@ -150,7 +150,7 @@ pub struct App {
     pub(crate) selection_highlight_clear_deadline: Option<Instant>,
     pub(crate) session_save_deadline: Option<Instant>,
     pub(crate) session_save_thread: Option<std::thread::JoinHandle<()>>,
-    pub(crate) detached_custom_command_children: Vec<std::process::Child>,
+    pub(crate) detached_process_children: Vec<std::process::Child>,
     tab_bar_status_generation: u64,
     tab_bar_datetimes: Vec<tab_bar_status::TabBarDatetimeRuntime>,
     tab_bar_commands: Vec<tab_bar_status::TabBarCommandRuntime>,
@@ -817,7 +817,7 @@ impl App {
             pending_agent_resume_deadline: None,
             session_save_deadline: None,
             session_save_thread: None,
-            detached_custom_command_children: Vec::new(),
+            detached_process_children: Vec::new(),
             tab_bar_status_generation: 0,
             tab_bar_datetimes: Vec::new(),
             tab_bar_commands: Vec::new(),
@@ -984,7 +984,7 @@ impl App {
         let mut host_keyboard_report_all_active = false;
 
         while !self.state.should_quit {
-            self.reap_finished_custom_commands();
+            self.reap_finished_detached_processes();
             if self.render_dirty.is_pending() {
                 needs_render = true;
             }

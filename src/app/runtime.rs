@@ -6,7 +6,7 @@ use super::{
     background_update_check_enabled, App, AUTO_UPDATE_CHECK_INTERVAL, MIN_RENDER_INTERVAL,
     RESIZE_POLL_INTERVAL, SELECTION_AUTOSCROLL_INTERVAL,
 };
-fn retain_custom_command_after_wait(
+fn retain_detached_process_after_wait(
     pid: u32,
     result: std::io::Result<Option<std::process::ExitStatus>>,
 ) -> bool {
@@ -15,16 +15,16 @@ fn retain_custom_command_after_wait(
         Ok(Some(_)) => false,
         Err(err) if err.kind() == std::io::ErrorKind::Interrupted => true,
         Err(err) => {
-            tracing::warn!(pid, err = %err, "failed to reap detached custom command");
+            tracing::warn!(pid, err = %err, "failed to reap detached process");
             false
         }
     }
 }
 
 impl App {
-    pub(crate) fn reap_finished_custom_commands(&mut self) {
-        self.detached_custom_command_children
-            .retain_mut(|child| retain_custom_command_after_wait(child.id(), child.try_wait()));
+    pub(crate) fn reap_finished_detached_processes(&mut self) {
+        self.detached_process_children
+            .retain_mut(|child| retain_detached_process_after_wait(child.id(), child.try_wait()));
     }
 
     pub(crate) fn shutdown_terminal_runtime(&mut self, terminal_id: crate::terminal::TerminalId) {
@@ -720,10 +720,10 @@ mod tests {
     use crate::workspace::Workspace;
 
     #[test]
-    fn interrupted_custom_command_wait_keeps_child_for_retry() {
+    fn interrupted_detached_process_wait_keeps_child_for_retry() {
         let interrupted = std::io::Error::new(std::io::ErrorKind::Interrupted, "test interrupt");
 
-        assert!(retain_custom_command_after_wait(42, Err(interrupted)));
+        assert!(retain_detached_process_after_wait(42, Err(interrupted)));
     }
 
     fn test_app_with_pane() -> (super::super::App, crate::layout::PaneId) {

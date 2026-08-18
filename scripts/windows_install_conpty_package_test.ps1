@@ -212,6 +212,64 @@ try {
 
     $manifest | Out-File -LiteralPath $manifestPath -Encoding utf8
     $stagedConpty = Join-Path $releasesDir ".staging.$($releaseDir.Name).$PID\conpty\conpty.dll"
+
+    $transientLockState = @{ Handle = $null; Acquired = $false; Released = $false }
+    $transientLockTimer = New-Object System.Timers.Timer
+    $transientLockTimer.Interval = 300
+    $transientLockTimer.AutoReset = $false
+    $transientLockSource = "HerdrTransientInstallerLock-$PID"
+    $transientLockRelease = Register-ObjectEvent `
+        -InputObject $transientLockTimer `
+        -EventName Elapsed `
+        -SourceIdentifier $transientLockSource `
+        -MessageData $transientLockState `
+        -Action {
+            $state = $event.MessageData
+            if ($null -ne $state.Handle) {
+                $state.Handle.Dispose()
+                $state.Handle = $null
+            }
+            $state.Released = $true
+        }
+    $lockStagedFileTransiently = {
+        if (-not $transientLockState.Acquired) {
+            $transientLockState.Handle = [System.IO.File]::Open(
+                $stagedConpty,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::Read
+            )
+            $transientLockState.Acquired = $true
+            $transientLockTimer.Start()
+        }
+    }.GetNewClosure()
+    $transientLockBreakpoint = Set-PSBreakpoint -Script $installerPath -Variable "backupDir" -Mode Write -Action $lockStagedFileTransiently
+    try {
+        & "$PSScriptRoot\..\website\install.ps1" `
+            -ManifestUrl $manifestUrl `
+            -InstallDir $installDir `
+            -ExpectedBuildId "installer-test"
+        if (-not $transientLockState.Acquired) {
+            throw "installer did not acquire the transient staged-file lock"
+        }
+        if (-not $transientLockState.Released) {
+            throw "installer activated the release before the transient lock was released"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $releaseDir.FullName "conpty\conpty.dll") -PathType Leaf)) {
+            throw "installer did not repair the release after the transient lock cleared"
+        }
+    } finally {
+        Remove-PSBreakpoint -Breakpoint $transientLockBreakpoint
+        $transientLockTimer.Stop()
+        Unregister-Event -SourceIdentifier $transientLockSource -ErrorAction SilentlyContinue
+        Remove-Job -Id $transientLockRelease.Id -Force -ErrorAction SilentlyContinue
+        if ($null -ne $transientLockState.Handle) {
+            $transientLockState.Handle.Dispose()
+        }
+        $transientLockTimer.Dispose()
+    }
+
+    Remove-Item -LiteralPath (Join-Path $releaseDir.FullName "conpty\conpty.dll") -Force
     $lockState = @{ Handle = $null }
     $lockStagedFile = {
         if ($null -eq $lockState.Handle) {
