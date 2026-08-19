@@ -594,6 +594,22 @@ impl App {
         }
     }
 
+    pub(crate) fn can_present_now(&self, now: Instant) -> bool {
+        match self.last_presentation_at {
+            Some(last_presentation_at) => {
+                now.duration_since(last_presentation_at) >= MIN_RENDER_INTERVAL
+            }
+            None => true,
+        }
+    }
+
+    pub(crate) fn record_render_attempt(&mut self, now: Instant, presentation: bool) {
+        self.last_render_at = Some(now);
+        if presentation {
+            self.last_presentation_at = Some(now);
+        }
+    }
+
     pub(crate) fn run_auto_update_check(&mut self) {
         if !background_update_check_enabled(self.no_session, self.update_version_check_enabled) {
             self.next_auto_update_check = None;
@@ -718,6 +734,20 @@ mod tests {
     use super::*;
     use crate::app::state;
     use crate::workspace::Workspace;
+
+    #[test]
+    fn hidden_render_attempt_keeps_presentation_cadence_available() {
+        let (mut app, _) = test_app_with_pane();
+        let initial_presentation = Instant::now();
+        app.record_render_attempt(initial_presentation, true);
+
+        let hidden_attempt = initial_presentation + MIN_RENDER_INTERVAL;
+        app.record_render_attempt(hidden_attempt, false);
+        let foreground_echo = hidden_attempt + Duration::from_millis(1);
+
+        assert!(!app.can_render_now(foreground_echo));
+        assert!(app.can_present_now(foreground_echo));
+    }
 
     #[test]
     fn interrupted_detached_process_wait_keeps_child_for_retry() {

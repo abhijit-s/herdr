@@ -698,8 +698,18 @@ impl HeadlessServer {
             self.stream_host_mouse_capture_mode();
             self.stream_host_keyboard_enhancement_flags();
 
-            // 7. Render virtually and stream frames.
-            if needs_render && self.app.can_render_now(now) {
+            // 7. Render virtually and stream frames. Hidden-only PTY work keeps a
+            // bounded classification cadence without delaying presentation work
+            // that joins the same coalesced request.
+            let render_cadence_due = self.app.can_render_now(now);
+            if needs_render
+                && (render_cadence_due
+                    || (self.app.can_present_now(now)
+                        && self.has_pending_presentation_work(
+                            needs_full_render,
+                            needs_graphics_render,
+                        )))
+            {
                 crate::render_prof::event("render.attempt");
                 let render_request = self.app.render_dirty.take();
                 let pty_dirty = !render_request.pty_sources.is_empty();
@@ -744,11 +754,12 @@ impl HeadlessServer {
                     PtyRenderState::Hidden
                 };
                 let mut deferred_graphics = false;
-                let rendered_retained = match retained_render_plan(RetainedRenderInput {
+                let render_plan = retained_render_plan(RetainedRenderInput {
                     needs_full_render,
                     needs_graphics_render,
                     pty,
-                }) {
+                });
+                let rendered_retained = match render_plan {
                     RetainedRenderPlan::Full => false,
                     RetainedRenderPlan::Graphics => {
                         match self.render_retained_graphics_update_and_stream() {
@@ -774,7 +785,8 @@ impl HeadlessServer {
                     crate::render_prof::event("full_render.invoke");
                     self.render_and_stream();
                 }
-                self.app.last_render_at = Some(now);
+                self.app
+                    .record_render_attempt(now, render_plan != RetainedRenderPlan::HiddenPty);
                 needs_render = false;
                 needs_full_render = false;
                 needs_graphics_render = false;
@@ -4071,10 +4083,32 @@ impl HeadlessServer {
         }
     }
 
-    fn pty_sources_visible_to_any_render_target(
+    fn has_pending_presentation_work(
         &self,
-        sources: &HashSet<crate::layout::PaneId>,
+        needs_full_render: bool,
+        needs_graphics_render: bool,
     ) -> bool {
+        if needs_full_render
+            || needs_graphics_render
+            || self.app.render_dirty.has_generic_or_terminal_title()
+        {
+            return true;
+        }
+
+        let (has_app_target, direct_terminal_targets) = self.pty_render_targets();
+        if !has_app_target && direct_terminal_targets.is_empty() {
+            return false;
+        }
+        self.app.render_dirty.has_pty_source_matching(|pane_id| {
+            self.pty_source_visible_to_render_targets(
+                pane_id,
+                has_app_target,
+                &direct_terminal_targets,
+            )
+        })
+    }
+
+    fn pty_render_targets(&self) -> (bool, HashSet<&str>) {
         let mut has_app_target = false;
         let mut direct_terminal_targets = HashSet::new();
         for client in self
@@ -4093,15 +4127,35 @@ impl HeadlessServer {
                 ClientConnectionMode::App => {}
             }
         }
+        (has_app_target, direct_terminal_targets)
+    }
+
+    fn pty_source_visible_to_render_targets(
+        &self,
+        pane_id: crate::layout::PaneId,
+        has_app_target: bool,
+        direct_terminal_targets: &HashSet<&str>,
+    ) -> bool {
+        let terminal_id = self.terminal_id_for_pane(pane_id);
+        (has_app_target && (terminal_id.is_none() || self.app_surface_contains_pane(pane_id)))
+            || terminal_id.is_none_or(|source| direct_terminal_targets.contains(source.as_str()))
+    }
+
+    fn pty_sources_visible_to_any_render_target(
+        &self,
+        sources: &HashSet<crate::layout::PaneId>,
+    ) -> bool {
+        let (has_app_target, direct_terminal_targets) = self.pty_render_targets();
         if !has_app_target && direct_terminal_targets.is_empty() {
             return false;
         }
 
-        sources.iter().any(|&pane_id| {
-            let terminal_id = self.terminal_id_for_pane(pane_id);
-            (has_app_target && (terminal_id.is_none() || self.app_surface_contains_pane(pane_id)))
-                || terminal_id
-                    .is_none_or(|source| direct_terminal_targets.contains(source.as_str()))
+        sources.iter().copied().any(|pane_id| {
+            self.pty_source_visible_to_render_targets(
+                pane_id,
+                has_app_target,
+                &direct_terminal_targets,
+            )
         })
     }
 
@@ -9631,6 +9685,17 @@ next_tab = ""
             client_rx.recv_timeout(Duration::from_millis(50)).is_err(),
             "identical frame should not be sent twice"
         );
+    }
+
+    #[test]
+    fn visible_source_wakes_pending_hidden_work() {
+        let (server, background_pane) = hidden_pty_visibility_test_server(&[(120, 40)]);
+        let visible_pane = server.app.state.workspaces[0].tabs[0].root_pane;
+
+        assert!(server.app.render_dirty.request_pty(background_pane));
+        assert!(!server.has_pending_presentation_work(false, false));
+        assert!(server.app.render_dirty.request_pty(visible_pane));
+        assert!(server.has_pending_presentation_work(false, false));
     }
 
     #[test]
