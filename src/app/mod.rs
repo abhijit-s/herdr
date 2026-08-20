@@ -1109,6 +1109,8 @@ impl App {
             }
 
             let now = Instant::now();
+            self.render_dirty
+                .set_immediate_pty_sources(self.state.app_surface_pane_ids());
             self.sync_host_mouse_capture(&mut host_mouse_capture_active)?;
             self.sync_host_keyboard_report_all(&mut host_keyboard_report_all_active)?;
 

@@ -154,8 +154,8 @@ impl App {
         if matches!(key_event.code, KeyCode::PageUp | KeyCode::PageDown)
             && key_event.modifiers.is_empty()
         {
-            if let Some(input_state) = rt.input_state() {
-                if input_state.plain_page_keys_use_host_scrollback() {
+            if let Some(host_scroll) = rt.plain_page_keys_use_host_scrollback() {
+                if host_scroll {
                     if key_event.kind == crossterm::event::KeyEventKind::Release {
                         return None;
                     }
@@ -276,14 +276,7 @@ impl App {
             None
         };
 
-        runtime.is_some_and(|runtime| {
-            let protocol = runtime.keyboard_protocol();
-            protocol.reports_all_keys()
-                || (protocol.reports_event_types()
-                    && runtime
-                        .input_state()
-                        .is_some_and(|state| state.modify_other_keys))
-        })
+        runtime.is_some_and(crate::terminal::TerminalRuntime::keyboard_report_all_requested)
     }
 
     fn terminal_input_runtime(
