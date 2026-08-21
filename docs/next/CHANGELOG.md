@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Direct terminal attaches now preserve multiline pastes as one paste instead of submitting each line separately. (#3054)
 - Windows panes now keep bare `cursor-agent` launches detected after Cursor hands off to its bundled Node process. (#3032)
 - Oversized Kitty images no longer prevent smaller images shown later in the same pane from rendering. (#3033)
 - Claude Code panes now use visible turn, background shell, and background agent activity as working-state fallbacks when OSC titles are unavailable or disabled. (#1630, #2241)
