@@ -1001,6 +1001,18 @@
           "description": "Hide the tab row when the workspace has one tab."
         },
         {
+          "key": "ui.tab_style",
+          "type": "enum",
+          "default": "\"block\"",
+          "values": [
+            "block",
+            "round",
+            "slant",
+            "powerline"
+          ],
+          "description": "Shape of each tab's leading and trailing edge. block draws square tabs, round and slant use widely available Unicode caps, and powerline uses powerline half-circles that need a Nerd Font. Caps sit inside each tab's existing padding, so no style changes tab widths or click targets."
+        },
+        {
           "key": "ui.tab_bar_position",
           "type": "enum",
           "default": "\"top\"",

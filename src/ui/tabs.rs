@@ -325,6 +325,55 @@ fn tab_drop_indicator_x(
     None
 }
 
+/// Leading and trailing cap glyphs for a tab, drawn in the tab's own colour on
+/// the bar background so the tab reads as a shaped tile rather than a rectangle.
+///
+/// Caps sit in the tab rect's outermost padding column, so they cost no extra
+/// width and leave hit areas, scrolling, and width math untouched.
+fn tab_cap_glyphs(style: crate::config::TabCapStyleConfig) -> Option<(&'static str, &'static str)> {
+    use crate::config::TabCapStyleConfig as Style;
+    match style {
+        Style::Block => None,
+        Style::Round => Some(("\u{25d6}", "\u{25d7}")),
+        Style::Slant => Some(("\u{2571}", "\u{2572}")),
+        // Powerline private-use caps; these need a Nerd Font to resolve.
+        Style::Powerline => Some(("\u{e0b6}", "\u{e0b4}")),
+    }
+}
+
+/// Minimum tab width that still leaves room for a label between two caps.
+const MIN_CAPPED_TAB_WIDTH: u16 = 3;
+
+fn draw_tab_caps(
+    frame: &mut Frame,
+    rect: Rect,
+    tab_bg: ratatui::style::Color,
+    bar_bg: ratatui::style::Color,
+    style: crate::config::TabCapStyleConfig,
+) {
+    let Some((left_cap, right_cap)) = tab_cap_glyphs(style) else {
+        return;
+    };
+    // A clipped tab has no padding to spare; keep its label over its caps.
+    if rect.width < MIN_CAPPED_TAB_WIDTH {
+        return;
+    }
+    let cap_style = Style::default().fg(tab_bg).bg(bar_bg);
+    let right_x = rect.x.saturating_add(rect.width).saturating_sub(1);
+    let buf = frame.buffer_mut();
+    let area = buf.area;
+    for (x, symbol) in [(rect.x, left_cap), (right_x, right_cap)] {
+        if x < area.x
+            || x >= area.x.saturating_add(area.width)
+            || rect.y < area.y
+            || rect.y >= area.y.saturating_add(area.height)
+        {
+            continue;
+        }
+        buf[(x, rect.y)].set_symbol(symbol).set_style(cap_style);
+    }
+}
+
 pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -399,8 +448,9 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
             continue;
         }
         let active = idx == ws.active_tab;
+        let tab_bg = if active { p.accent } else { p.surface0 };
         let style = if active {
-            let base = Style::default().fg(panel_contrast_fg(p)).bg(p.accent);
+            let base = Style::default().fg(panel_contrast_fg(p)).bg(tab_bg);
             if tab.is_auto_named() {
                 base
             } else {
@@ -409,10 +459,10 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         } else if tab.is_auto_named() {
             Style::default()
                 .fg(p.overlay0)
-                .bg(p.surface0)
+                .bg(tab_bg)
                 .add_modifier(Modifier::DIM)
         } else {
-            Style::default().fg(p.overlay1).bg(p.surface0)
+            Style::default().fg(p.overlay1).bg(tab_bg)
         };
         let width = rect.width as usize;
         let name = tab_chrome_label(ws, idx);
@@ -425,6 +475,7 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
             right = padding - left
         );
         frame.render_widget(Paragraph::new(text).style(style), rect);
+        draw_tab_caps(frame, rect, tab_bg, p.panel_bg, app.tab_style);
     }
 
     if let Some(crate::app::state::DragState {
@@ -553,6 +604,55 @@ mod tests {
             .collect::<String>()
             .trim_end()
             .to_string()
+    }
+
+    #[test]
+    fn tab_caps_shape_tab_edges_without_changing_geometry() {
+        use crate::config::TabCapStyleConfig;
+
+        fn render(style: TabCapStyleConfig) -> (Vec<Rect>, String) {
+            let mut app = AppState::test_new();
+            app.workspaces = vec![Workspace::test_new("one")];
+            app.active = Some(0);
+            app.tab_style = style;
+            app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
+            let view =
+                compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+            app.view.tab_hit_areas = view.tab_hit_areas.clone();
+
+            let mut terminal = Terminal::new(TestBackend::new(30, 1)).unwrap();
+            terminal
+                .draw(|frame| render_tab_bar(&app, frame, app.view.tab_bar_rect))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+
+            let rect = app.view.tab_hit_areas[0];
+            let row: String = (rect.x..rect.x + rect.width)
+                .map(|x| buffer[(x, rect.y)].symbol().to_owned())
+                .collect();
+            (view.tab_hit_areas, row)
+        }
+
+        let (block_areas, block_row) = render(TabCapStyleConfig::Block);
+        for style in [
+            TabCapStyleConfig::Round,
+            TabCapStyleConfig::Slant,
+            TabCapStyleConfig::Powerline,
+        ] {
+            let (areas, row) = render(style);
+            // Caps live inside existing padding, so layout must not move.
+            assert_eq!(areas, block_areas, "{style:?} changed tab geometry");
+            assert_eq!(row.chars().count(), block_row.chars().count());
+        }
+
+        let (_, round) = render(TabCapStyleConfig::Round);
+        assert!(round.starts_with('\u{25d6}') && round.ends_with('\u{25d7}'));
+        let (_, slant) = render(TabCapStyleConfig::Slant);
+        assert!(slant.starts_with('\u{2571}') && slant.ends_with('\u{2572}'));
+        let (_, powerline) = render(TabCapStyleConfig::Powerline);
+        assert!(powerline.starts_with('\u{e0b6}') && powerline.ends_with('\u{e0b4}'));
+        // Block draws no caps at all.
+        assert!(!block_row.starts_with('\u{25d6}'));
     }
 
     #[test]

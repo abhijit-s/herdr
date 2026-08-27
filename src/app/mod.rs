@@ -698,6 +698,7 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             tab_bar_position: config.ui.tab_bar_position,
+            tab_style: config.ui.tab_style,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
             pane_history_persistence: config.experimental.pane_history,
@@ -1577,6 +1578,7 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
                 self.state.tab_bar_position = config.ui.tab_bar_position;
+                self.state.tab_style = config.ui.tab_style;
                 self.configure_tab_bar_status(
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
