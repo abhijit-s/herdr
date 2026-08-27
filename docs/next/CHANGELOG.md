@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [0.8.3-abhi.1] - 2026-08-27
+
+### Added
+- Pane borders, modals, menus, and toast notifications can now draw rounded corners via `ui.rounded_borders`, which defaults to enabled.
+- Tabs can now shape their leading and trailing edges via `ui.tab_style`, with `block`, `round`, `slant`, and `powerline` styles. `powerline` needs a Nerd Font; the others render in any font.
+
+### Fixed
+- Tab labels now sit on the exact centre column. Short labels padded out to the minimum tab width previously left an odd padding budget and rendered one column left of centre.
+
 ### Added
 - Custom themes can now define separate light and dark color overrides when automatic theme switching is enabled. (#837, thanks @aneym)
 
