@@ -32,6 +32,7 @@ pub(super) fn render_release_notes_overlay(app: &AppState, frame: &mut Frame, ar
         RELEASE_NOTES_MODAL_SIZE.0,
         RELEASE_NOTES_MODAL_SIZE.1,
         &app.palette,
+        app.rounded_borders,
     ) else {
         return;
     };
@@ -147,6 +148,7 @@ pub(super) fn render_product_announcement_overlay(app: &AppState, frame: &mut Fr
         PRODUCT_ANNOUNCEMENT_MODAL_SIZE.0,
         PRODUCT_ANNOUNCEMENT_MODAL_SIZE.1,
         &app.palette,
+        app.rounded_borders,
     ) else {
         return;
     };

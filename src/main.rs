@@ -358,6 +358,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Draw rounded corners on pane borders, modals, menus, and toasts.
+# Set false for square corners, or if your terminal font renders the rounded
+# box-drawing glyphs poorly.
+# rounded_borders = true
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 

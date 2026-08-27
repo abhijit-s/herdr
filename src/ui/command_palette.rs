@@ -130,7 +130,14 @@ pub(crate) fn render_command_palette_overlay(app: &AppState, frame: &mut Frame) 
     let popup_h = area.height.saturating_mul(6) / 10;
     // Minimum-size floor: filter line + at least a few rows. Refuse to render a
     // clipped box when the terminal is too small.
-    let Some(inner) = render_modal_shell(frame, area, popup_w.max(20), popup_h.max(5), p) else {
+    let Some(inner) = render_modal_shell(
+        frame,
+        area,
+        popup_w.max(20),
+        popup_h.max(5),
+        p,
+        app.rounded_borders,
+    ) else {
         return;
     };
     let areas = modal_stack_areas(inner, 1, 0, 0, 1);

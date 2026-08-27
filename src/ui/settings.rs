@@ -40,7 +40,8 @@ pub(super) fn render_settings_overlay(app: &AppState, frame: &mut Frame, area: R
 
     super::dim_background(frame, area);
 
-    let Some(inner) = render_panel_shell(frame, popup, p.accent, p.panel_bg) else {
+    let Some(inner) = render_panel_shell(frame, popup, p.accent, p.panel_bg, app.rounded_borders)
+    else {
         return;
     };
     if inner.height < 4 || inner.width < 10 {

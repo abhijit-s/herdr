@@ -983,6 +983,12 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.rounded_borders",
+          "type": "boolean",
+          "default": "true",
+          "description": "Draw rounded corners on pane borders, modals, menus, and toast notifications. Disable for square corners, or if your terminal font renders the rounded box-drawing glyphs poorly."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",

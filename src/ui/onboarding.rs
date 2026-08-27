@@ -29,7 +29,8 @@ pub(crate) fn onboarding_welcome_continue_rect(area: Rect) -> Rect {
 }
 
 fn render_onboarding_welcome(app: &AppState, frame: &mut Frame, area: Rect) {
-    let Some(inner) = render_modal_shell(frame, area, 64, 16, &app.palette) else {
+    let Some(inner) = render_modal_shell(frame, area, 64, 16, &app.palette, app.rounded_borders)
+    else {
         return;
     };
     if inner.height < 11 {

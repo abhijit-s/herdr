@@ -213,8 +213,13 @@ pub(super) fn render_navigate_overlay(app: &AppState, frame: &mut Frame, area: R
 
 pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
     let rect = app.global_menu_rect();
-    let Some(inner) = render_panel_shell(frame, rect, app.palette.accent, app.palette.panel_bg)
-    else {
+    let Some(inner) = render_panel_shell(
+        frame,
+        rect,
+        app.palette.accent,
+        app.palette.panel_bg,
+        app.rounded_borders,
+    ) else {
         return;
     };
 
@@ -292,7 +297,9 @@ pub(super) fn render_context_menu(app: &AppState, frame: &mut Frame) {
     let Some(menu_rect) = app.context_menu_rect() else {
         return;
     };
-    let Some(inner) = render_panel_shell(frame, menu_rect, p.accent, p.panel_bg) else {
+    let Some(inner) =
+        render_panel_shell(frame, menu_rect, p.accent, p.panel_bg, app.rounded_borders)
+    else {
         return;
     };
 
