@@ -115,5 +115,12 @@ reserves, so no style changes tab widths, hit areas, or scroll math.
   on a `v*` tag. Two jobs (`close-released-issues`, `update-latest-json`) need
   upstream-only secrets and fail here; they run after the release publishes, so
   assets are unaffected.
+- `flake-check` currently fails, which blocks the automated `release` job because
+  `release` depends on it. This is **not fork-specific**: crates.io began
+  returning 403 to curl's default User-Agent between 2026-08-25 and 2026-08-27,
+  and the pinned nixpkgs (2026-05-21) fetches uncached crates with that agent.
+  Upstream fails identically on the same dates. Expect the fix to arrive via an
+  upstream `flake.lock` bump; until then publish release assets from the
+  workflow's successful `build` jobs with `gh release create`.
 - Linux binaries can also be built without tagging via the
   "Build artifacts (manual)" workflow.
