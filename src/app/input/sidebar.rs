@@ -1448,15 +1448,18 @@ mod tests {
         let target = app.state.view.tab_hit_areas[last_idx];
         let clamped_scroll = app.state.tab_scroll;
         assert!(target.width > 0, "last tab should already be visible");
+        // The last visible tab can be clipped to a single column, so target its
+        // right edge rather than assuming a second column exists.
+        let click_x = target.x + target.width - 1;
 
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
-            target.x + 1,
+            click_x,
             target.y,
         ));
         app.handle_mouse(mouse(
             MouseEventKind::Up(MouseButton::Left),
-            target.x + 1,
+            click_x,
             target.y,
         ));
 

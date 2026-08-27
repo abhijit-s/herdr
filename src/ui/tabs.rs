@@ -29,9 +29,15 @@ pub(crate) struct TabBarView {
 }
 
 fn tab_width(ws: &crate::workspace::Workspace, tab_idx: usize) -> u16 {
-    display_width_u16(&tab_chrome_label(ws, tab_idx))
-        .saturating_add(4)
-        .max(MIN_TAB_WIDTH)
+    let label = display_width_u16(&tab_chrome_label(ws, tab_idx));
+    let width = label.saturating_add(4).max(MIN_TAB_WIDTH);
+    // An odd padding budget has no centre column, so the label lands half a cell
+    // off. Widening by one keeps the split even and the label truly centred.
+    if (width - label).is_multiple_of(2) {
+        width
+    } else {
+        width.saturating_add(1)
+    }
 }
 
 fn tab_chrome_label(ws: &crate::workspace::Workspace, tab_idx: usize) -> String {
@@ -604,6 +610,25 @@ mod tests {
             .collect::<String>()
             .trim_end()
             .to_string()
+    }
+
+    #[test]
+    fn tab_labels_sit_on_the_exact_centre_column() {
+        // MIN_TAB_WIDTH forces short labels into a wider tab; an odd padding
+        // budget used to push the label one column left of centre.
+        for name in ["1", "ab", "abc", "main", "log", "a"] {
+            let mut ws = Workspace::test_new(name);
+            ws.tabs[0].custom_name = Some(name.to_string());
+            let width = tab_width(&ws, 0);
+            let label = display_width_u16(&tab_chrome_label(&ws, 0));
+            let padding = width - label;
+            assert_eq!(
+                padding % 2,
+                0,
+                "{name:?} has odd padding {padding} in width {width}"
+            );
+            assert!(width >= MIN_TAB_WIDTH, "{name:?} narrower than the minimum");
+        }
     }
 
     #[test]
