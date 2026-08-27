@@ -18,14 +18,21 @@ merges rewrite context and some fork commits are later superseded upstream.
 
 - Every fork-only feature is gated behind a config key wherever practical, so
   the default build stays close to upstream and merges stay cheap.
-- Fork releases use a semver prerelease suffix (`0.8.3-abhi.1`) so they sort
-  below the equivalent upstream version and never squat an upstream tag.
-- `just release` rejects prerelease versions, so fork releases bump
+- **Fork releases must use a plain `X.Y.Z` version.** A semver prerelease suffix
+  in `Cargo.toml` is not viable: `build_info.rs` reserves the `-suffix` form for
+  its own `{BASE_VERSION}-{channel}.{build_id}` identity, and
+  `update::Version::parse` accepts exactly three numeric parts. A prerelease
+  version makes `Version::current()` — a `pub fn` ending in `.expect()` — panic,
+  which takes down update checks and plugin `min_herdr_version` gating. It fails
+  ~54 tests, so run the full suite after any version bump.
+- Fork releases therefore reuse upstream's next patch number. Reconcile the
+  `Cargo.toml` conflict on the upstream merge that ships that version.
+- `just release` also rejects anything but `X.Y.Z`, so fork releases bump
   `Cargo.toml`, curate the changelog, tag, and push by hand.
 
 ## Divergence summary
 
-As of `v0.8.3-abhi.1`: 41 non-merge commits, 62 files, +5430/-383 vs
+As of `v0.8.3`: 41 non-merge commits, 62 files, +5430/-383 vs
 `upstream/master`.
 
 Regenerate with:

@@ -123,7 +123,12 @@ pub(crate) fn tab_bar_content_area(app: &AppState, area: Rect) -> Rect {
     }
 }
 
-fn layout_tab_hit_areas(ws: &crate::workspace::Workspace, area: Rect, scroll: usize) -> Vec<Rect> {
+fn layout_tab_hit_areas(
+    ws: &crate::workspace::Workspace,
+    area: Rect,
+    scroll: usize,
+    style: crate::config::TabCapStyleConfig,
+) -> Vec<Rect> {
     let mut rects = vec![Rect::default(); ws.tabs.len()];
     if area.width == 0 || area.height == 0 {
         return rects;
@@ -139,18 +144,22 @@ fn layout_tab_hit_areas(ws: &crate::workspace::Workspace, area: Rect, scroll: us
         let remaining = right.saturating_sub(x);
         let width = desired.min(remaining).max(1);
         *rect = Rect::new(x, area.y, width, 1);
-        x = x.saturating_add(width + 1);
+        x = x.saturating_add(width + tab_gap(style));
     }
     rects
 }
 
-fn centered_tab_scroll(ws: &crate::workspace::Workspace, area: Rect) -> usize {
+fn centered_tab_scroll(
+    ws: &crate::workspace::Workspace,
+    area: Rect,
+    style: crate::config::TabCapStyleConfig,
+) -> usize {
     let mut best_scroll = ws.active_tab;
     let mut best_distance = u16::MAX;
     let viewport_center = area.x.saturating_mul(2).saturating_add(area.width);
 
     for scroll in 0..=ws.active_tab {
-        let rects = layout_tab_hit_areas(ws, area, scroll);
+        let rects = layout_tab_hit_areas(ws, area, scroll, style);
         let Some(active_rect) = rects.get(ws.active_tab).copied() else {
             continue;
         };
@@ -181,10 +190,14 @@ fn trailing_tab_controls_x(tab_hit_areas: &[Rect], fallback_x: u16) -> u16 {
         .unwrap_or(fallback_x)
 }
 
-fn max_tab_scroll(ws: &crate::workspace::Workspace, area: Rect) -> usize {
+fn max_tab_scroll(
+    ws: &crate::workspace::Workspace,
+    area: Rect,
+    style: crate::config::TabCapStyleConfig,
+) -> usize {
     (0..ws.tabs.len())
         .find(|&scroll| {
-            layout_tab_hit_areas(ws, area, scroll)
+            layout_tab_hit_areas(ws, area, scroll, style)
                 .last()
                 .is_some_and(|rect| rect.width > 0)
         })
@@ -197,21 +210,22 @@ pub(crate) fn compute_tab_bar_view(
     current_scroll: usize,
     follow_active: bool,
     mouse_chrome: bool,
+    style: crate::config::TabCapStyleConfig,
 ) -> TabBarView {
     if area.width == 0 || area.height == 0 {
         return TabBarView::default();
     }
 
     if !mouse_chrome {
-        let max_scroll = max_tab_scroll(ws, area);
+        let max_scroll = max_tab_scroll(ws, area, style);
         let scroll = if follow_active {
-            centered_tab_scroll(ws, area).min(max_scroll)
+            centered_tab_scroll(ws, area, style).min(max_scroll)
         } else {
             current_scroll.min(max_scroll)
         };
         return TabBarView {
             scroll,
-            tab_hit_areas: layout_tab_hit_areas(ws, area, scroll),
+            tab_hit_areas: layout_tab_hit_areas(ws, area, scroll, style),
             scroll_left_hit_area: Rect::default(),
             scroll_right_hit_area: Rect::default(),
             new_tab_hit_area: Rect::default(),
@@ -225,7 +239,7 @@ pub(crate) fn compute_tab_bar_view(
         area.width.saturating_sub(NEW_TAB_WIDTH),
         area.height,
     );
-    let all_tabs = layout_tab_hit_areas(ws, all_tabs_area, 0);
+    let all_tabs = layout_tab_hit_areas(ws, all_tabs_area, 0, style);
     let overflow = all_tabs.iter().any(|rect| rect.width == 0);
     if !overflow {
         let new_tab_x = trailing_tab_controls_x(&all_tabs, area.x);
@@ -255,13 +269,13 @@ pub(crate) fn compute_tab_bar_view(
         area.height,
     );
 
-    let max_scroll = max_tab_scroll(ws, tab_area);
+    let max_scroll = max_tab_scroll(ws, tab_area, style);
     let scroll = if follow_active {
-        centered_tab_scroll(ws, tab_area).min(max_scroll)
+        centered_tab_scroll(ws, tab_area, style).min(max_scroll)
     } else {
         current_scroll.min(max_scroll)
     };
-    let tab_hit_areas = layout_tab_hit_areas(ws, tab_area, scroll);
+    let tab_hit_areas = layout_tab_hit_areas(ws, tab_area, scroll, style);
     let trailing_x = trailing_tab_controls_x(&tab_hit_areas, tab_area_x).min(tab_area_right);
     let right_hit_area = Rect::new(
         trailing_x,
@@ -349,6 +363,19 @@ fn tab_cap_glyphs(style: crate::config::TabCapStyleConfig) -> Option<(&'static s
 
 /// Minimum tab width that still leaves room for a label between two caps.
 const MIN_CAPPED_TAB_WIDTH: u16 = 3;
+
+/// Blank columns between adjacent tabs.
+///
+/// Flat tabs need a blank column so they do not butt together. Cap glyphs taper
+/// at each end and already separate neighbours, so a blank column there reads as
+/// too wide a gap.
+fn tab_gap(style: crate::config::TabCapStyleConfig) -> u16 {
+    if tab_cap_glyphs(style).is_some() {
+        0
+    } else {
+        1
+    }
+}
 
 fn draw_tab_caps(
     frame: &mut Frame,
@@ -613,6 +640,39 @@ mod tests {
     }
 
     #[test]
+    fn capped_tabs_close_the_inter_tab_gap() {
+        use crate::config::TabCapStyleConfig;
+
+        fn gaps(style: TabCapStyleConfig) -> Vec<u16> {
+            let mut ws = Workspace::test_new("one");
+            ws.tabs[0].custom_name = Some("main".into());
+            ws.test_add_tab(Some("logs"));
+            ws.test_add_tab(Some("build"));
+            let rects = layout_tab_hit_areas(&ws, Rect::new(0, 0, 60, 1), 0, style);
+            rects
+                .windows(2)
+                .map(|pair| pair[1].x - (pair[0].x + pair[0].width))
+                .collect()
+        }
+
+        // Flat tabs keep a blank column so they do not butt together.
+        assert!(gaps(TabCapStyleConfig::Block).iter().all(|g| *g == 1));
+
+        // Cap glyphs taper at each end and separate neighbours on their own.
+        for style in [
+            TabCapStyleConfig::Round,
+            TabCapStyleConfig::Slant,
+            TabCapStyleConfig::Powerline,
+        ] {
+            assert!(
+                gaps(style).iter().all(|g| *g == 0),
+                "{style:?} should close the gap, got {:?}",
+                gaps(style)
+            );
+        }
+    }
+
+    #[test]
     fn tab_labels_sit_on_the_exact_centre_column() {
         // MIN_TAB_WIDTH forces short labels into a wider tab; an odd padding
         // budget used to push the label one column left of centre.
@@ -641,8 +701,14 @@ mod tests {
             app.active = Some(0);
             app.tab_style = style;
             app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-            let view =
-                compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+            let view = compute_tab_bar_view(
+                &app.workspaces[0],
+                app.view.tab_bar_rect,
+                0,
+                true,
+                false,
+                crate::config::TabCapStyleConfig::Block,
+            );
             app.view.tab_hit_areas = view.tab_hit_areas.clone();
 
             let mut terminal = Terminal::new(TestBackend::new(30, 1)).unwrap();
@@ -691,7 +757,14 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -726,7 +799,14 @@ mod tests {
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 60, 1);
         let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            content,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas.clone();
 
         let backend = TestBackend::new(60, 1);
@@ -761,7 +841,14 @@ mod tests {
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 40, 1);
         let content = tab_bar_content_area(&app, app.view.tab_bar_rect);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            content,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(40, 1);
@@ -793,7 +880,14 @@ mod tests {
         let wide_enough = Rect::new(0, 0, MIN_TAB_STRIP_WIDTH + 2, 1);
         let content = tab_bar_content_area(&app, wide_enough);
         assert_eq!(content.width, MIN_TAB_STRIP_WIDTH);
-        let view = compute_tab_bar_view(&app.workspaces[0], content, 0, true, true);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            content,
+            0,
+            true,
+            true,
+            crate::config::TabCapStyleConfig::Block,
+        );
         assert!(view.tab_hit_areas[0].width >= MIN_TAB_WIDTH);
     }
 
@@ -822,6 +916,7 @@ mod tests {
             0,
             true,
             true,
+            crate::config::TabCapStyleConfig::Block,
         );
         assert!(view.tab_hit_areas[0].width > 0);
         assert!(view.new_tab_hit_area.width > 0);
@@ -865,7 +960,14 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -895,7 +997,14 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -920,7 +1029,14 @@ mod tests {
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);
@@ -1019,7 +1135,14 @@ mod tests {
                 status_interval: 5,
             });
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], Rect::new(0, 0, 24, 1), 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            Rect::new(0, 0, 24, 1),
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
         app.view.status_strip_rect = Rect::new(25, 0, 5, 1);
 
@@ -1044,7 +1167,14 @@ mod tests {
         app.active = Some(0);
         app.workspaces = vec![ws];
         app.view.tab_bar_rect = Rect::new(0, 0, 30, 1);
-        let view = compute_tab_bar_view(&app.workspaces[0], app.view.tab_bar_rect, 0, true, false);
+        let view = compute_tab_bar_view(
+            &app.workspaces[0],
+            app.view.tab_bar_rect,
+            0,
+            true,
+            false,
+            crate::config::TabCapStyleConfig::Block,
+        );
         app.view.tab_hit_areas = view.tab_hit_areas;
 
         let backend = TestBackend::new(30, 1);

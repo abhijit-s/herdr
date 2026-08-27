@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## [0.8.3-abhi.1] - 2026-08-27
+## [0.8.3] - 2026-08-27
 
 ### Added
 - Pane borders, modals, menus, and toast notifications can now draw rounded corners via `ui.rounded_borders`, which defaults to enabled.
