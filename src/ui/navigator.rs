@@ -24,8 +24,13 @@ pub(super) fn render_navigator_overlay(
     frame: &mut Frame,
 ) {
     let popup = app.navigator_popup_rect();
-    let Some(inner) = render_panel_shell(frame, popup, app.palette.accent, app.palette.panel_bg)
-    else {
+    let Some(inner) = render_panel_shell(
+        frame,
+        popup,
+        app.palette.accent,
+        app.palette.panel_bg,
+        app.rounded_borders,
+    ) else {
         return;
     };
 

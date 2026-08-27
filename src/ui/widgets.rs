@@ -8,11 +8,20 @@ use ratatui::{
 
 use crate::app::state::Palette;
 
+pub(super) fn border_set(rounded: bool) -> ratatui::symbols::border::Set<'static> {
+    if rounded {
+        ratatui::symbols::border::ROUNDED
+    } else {
+        ratatui::symbols::border::PLAIN
+    }
+}
+
 pub(super) fn render_panel_shell(
     frame: &mut Frame,
     area: Rect,
     border_color: Color,
     bg: Color,
+    rounded: bool,
 ) -> Option<Rect> {
     if area.width < 2 || area.height < 2 {
         return None;
@@ -21,7 +30,7 @@ pub(super) fn render_panel_shell(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
-        .border_set(ratatui::symbols::border::PLAIN)
+        .border_set(border_set(rounded))
         .style(Style::default().bg(bg));
     let inner = block.inner(area);
     frame.render_widget(Clear, area);
@@ -54,9 +63,10 @@ pub(super) fn render_modal_shell(
     popup_w: u16,
     popup_h: u16,
     p: &Palette,
+    rounded: bool,
 ) -> Option<Rect> {
     let popup = centered_popup_rect(area, popup_w, popup_h)?;
-    render_panel_shell(frame, popup, p.accent, p.panel_bg)
+    render_panel_shell(frame, popup, p.accent, p.panel_bg, rounded)
 }
 
 pub(super) fn render_modal_header(frame: &mut Frame, area: Rect, title: &str, p: &Palette) {
@@ -275,4 +285,36 @@ pub(super) fn centered_button_row(
             rect
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn panel_shell_corners_follow_the_rounded_flag() {
+        fn corners(rounded: bool) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(6, 3)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_panel_shell(
+                        frame,
+                        Rect::new(0, 0, 6, 3),
+                        Color::White,
+                        Color::Reset,
+                        rounded,
+                    );
+                })
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            [(0, 0), (5, 0), (0, 2), (5, 2)]
+                .iter()
+                .map(|&(x, y)| buf[(x, y)].symbol().to_owned())
+                .collect()
+        }
+
+        assert_eq!(corners(true), "╭╮╰╯");
+        assert_eq!(corners(false), "┌┐└┘");
+    }
 }

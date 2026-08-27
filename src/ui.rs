@@ -544,6 +544,7 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
                 has_config_diagnostic,
                 toast.position.unwrap_or(app.toast_config.herdr.position),
                 &app.palette,
+                app.rounded_borders,
             );
             toast_rect = Some(toast_notification_rect(
                 frame.area(),
@@ -581,6 +582,7 @@ fn render_notifications(app: &AppState, frame: &mut Frame, terminal_area: Rect) 
             copy_feedback_offset,
             app.toast_config.clipboard.position,
             &app.palette,
+            app.rounded_borders,
         );
     }
 }

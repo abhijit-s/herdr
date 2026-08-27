@@ -919,6 +919,21 @@ pub struct WorktreesConfig {
     pub directory: String,
 }
 
+/// Shape of the leading and trailing edge of each tab in the tab row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TabCapStyleConfig {
+    /// Square edges filled to the tab rect.
+    #[default]
+    Block,
+    /// Half-circle caps. Renders in any font with common Unicode geometric shapes.
+    Round,
+    /// Diagonal caps drawn with box-drawing slashes. Renders in any font.
+    Slant,
+    /// Powerline half-circle caps. Requires a Nerd Font.
+    Powerline,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TabBarPositionConfig {
@@ -967,12 +982,16 @@ pub struct UiConfig {
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Draw rounded corners on pane borders, modals, menus, and toasts. Default: true.
+    pub rounded_borders: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
+    /// Shape of each tab's leading and trailing edge. Default: block.
+    pub tab_style: TabCapStyleConfig,
     /// Ordered entries shown at the right edge of the desktop tab row. Empty by default.
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
     /// Text inserted between visible right-side tab bar entries. Default: one space.
@@ -1206,9 +1225,11 @@ impl Default for UiConfig {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: true,
+            rounded_borders: true,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
+            tab_style: TabCapStyleConfig::default(),
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
             window_title: super::window_title::default_window_title(),
@@ -1496,12 +1517,14 @@ status_indicators = "symbols"
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
+        assert!(default_config.ui.rounded_borders);
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(
             default_config.ui.tab_bar_position,
             TabBarPositionConfig::Top
         );
+        assert_eq!(default_config.ui.tab_style, TabCapStyleConfig::Block);
         assert!(default_config.ui.tab_bar_right.is_empty());
         assert_eq!(default_config.ui.tab_bar_right_separator, " ");
 
@@ -1511,9 +1534,11 @@ pane_borders = false
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
+rounded_borders = false
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
+tab_style = "slant"
 tab_bar_right = [
   { type = "zoom" },
   { type = "hostname" },
@@ -1528,9 +1553,11 @@ tab_bar_right_separator = " · "
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
+        assert!(!config.ui.rounded_borders);
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
+        assert_eq!(config.ui.tab_style, TabCapStyleConfig::Slant);
         assert_eq!(config.ui.tab_bar_right.len(), 5);
         assert!(matches!(
             config.ui.tab_bar_right[1],
