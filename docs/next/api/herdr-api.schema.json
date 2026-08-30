@@ -4402,6 +4402,9 @@
                 "null"
               ]
             },
+            "trust_repository": {
+              "type": "boolean"
+            },
             "workspace_id": {
               "type": [
                 "string",
@@ -4418,6 +4421,9 @@
                 "string",
                 "null"
               ]
+            },
+            "trust_repository": {
+              "type": "boolean"
             },
             "workspace_id": {
               "type": [
@@ -4458,6 +4464,9 @@
                 "null"
               ]
             },
+            "trust_repository": {
+              "type": "boolean"
+            },
             "workspace_id": {
               "type": [
                 "string",
@@ -4471,6 +4480,9 @@
           "properties": {
             "force": {
               "default": false,
+              "type": "boolean"
+            },
+            "trust_repository": {
               "type": "boolean"
             },
             "workspace_id": {

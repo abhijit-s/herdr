@@ -747,6 +747,30 @@ fn claude_blocker_screen_outranks_osc_idle_title() {
 }
 
 #[test]
+fn claude_mcp_elicitation_is_blocked() {
+    // Regression for issue #3283: an MCP elicitation dialog has Accept/Decline
+    // controls and an "Esc to cancel" footer but no Enter hint, so no blocked
+    // rule matched and the static OSC title reported idle.
+    // Live capture uses curly quotes around the server name; the issue report
+    // transcribed straight quotes. Both must classify as blocked.
+    for screen in [
+        "MCP server \u{201c}my-server\u{201d} requests your input\n\nGrant temporary access to the demo gateway for 15 minutes?\n\n\u{276f} Accept    Decline\n\nEsc to cancel \u{b7} \u{2191}/\u{2193} to navigate\n",
+        "MCP server \"my-server\" requests your input\n\nserver-supplied message\n\n\u{276f} Accept    Decline\n\nEsc to cancel \u{b7} \u{2191}/\u{2193} to navigate\n",
+    ] {
+        let result = with_manifest_dirs("claude-mcp-elicitation", || {
+            osc_explain(Agent::Claude, screen, "\u{2733} Claude Code", "")
+        });
+        assert_eq!(result.state, AgentState::Blocked, "{result:#?}");
+        assert!(result.visible_blocker, "{result:#?}");
+        assert_eq!(
+            result.matched_rule.as_ref().map(|r| r.id.as_str()),
+            Some("mcp_elicitation_prompt"),
+            "{result:#?}"
+        );
+    }
+}
+
+#[test]
 fn claude_empty_osc_empty_screen_is_idle_fallback() {
     // No OSC data, no matching screen rule → fallback idle (unchanged V3 behavior)
     let result = osc_explain(Agent::Claude, "", "", "");
@@ -890,18 +914,62 @@ fn codex_screen_blocker_outranks_working_fallback() {
 }
 
 #[test]
-fn codex_weak_blocker_outranks_working_fallback() {
-    let screen = "• Working (4s • esc to interrupt)\n\
-        do you want to continue? [y/n]\n\
-        › Use /skills to list available skills\n";
-    let result = osc_explain(Agent::Codex, screen, "project", "");
+fn codex_weak_blocker_without_current_prompt_is_blocked() {
+    let result = osc_explain(
+        Agent::Codex,
+        "do you want to continue? [y/n]\n",
+        "project",
+        "",
+    );
 
     assert_eq!(result.state, AgentState::Blocked);
     assert_eq!(
         result.matched_rule.as_ref().map(|r| r.id.as_str()),
         Some("weak_blocker")
     );
-    assert!(!result.visible_working);
+}
+
+#[test]
+fn codex_current_prompt_keeps_weak_text_from_overriding_working_fallback() {
+    let screen = "• Working (4s • esc to interrupt)\n\
+        do you want to continue? [y/n]\n\
+        › Use /skills to list available skills\n";
+    let result = osc_explain(Agent::Codex, screen, "project", "");
+
+    assert_eq!(result.state, AgentState::Working);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("screen_working_fallback")
+    );
+    assert!(result.visible_working);
+}
+
+#[test]
+fn codex_weak_blocker_ignores_finished_response_above_current_prompt() {
+    let screen = "• The `wt rm` transcript now shows [y/N] / esc, matching the real prompt.\n\n\
+        ─ Worked for 4m 59s ─\n\n\
+        › Ask Codex to do anything\n";
+    let result = osc_explain(Agent::Codex, screen, "project", "");
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("osc_title_idle")
+    );
+}
+
+#[test]
+fn codex_weak_blocker_ignores_wrapped_current_prompt_text() {
+    let screen = "› Explain why this prompt wraps before quoting the confirmation text\n\
+          [y/N] / esc and whether the docs should include it\n\n\
+          gpt-5.6-sol default · /work\n";
+    let result = osc_explain(Agent::Codex, screen, "project", "");
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|r| r.id.as_str()),
+        Some("osc_title_idle")
+    );
 }
 
 #[test]
