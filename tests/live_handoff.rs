@@ -1,4 +1,4 @@
-mod support;
+pub mod support;
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -12,8 +12,10 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use support::{
-    cleanup_test_base, client_handshake, register_runtime_dir, register_spawned_herdr_pid,
-    send_input, unregister_spawned_herdr_pid, wait_for_disconnect, wait_for_socket,
+    cleanup_test_base, client_shell_handshake, register_runtime_dir, register_spawned_herdr_pid,
+    send_client_shell_shift_enter, unregister_spawned_herdr_pid, wait_for_client_shell_bootstrap,
+    wait_for_message_variant, wait_for_socket, SERVER_MESSAGE_CLIENT_SHELL_SNAPSHOT,
+    SERVER_MESSAGE_SERVER_SHUTDOWN,
 };
 
 struct SpawnedHerdr {
@@ -868,9 +870,19 @@ fn live_handoff_preserves_pane_process_io() {
         .as_u64()
         .unwrap() as u32;
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
-    let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
+    let (server_protocol, error) =
+        client_shell_handshake(&mut client_stream, protocol, 54, 23).unwrap();
     assert_eq!(server_protocol, protocol);
-    assert!(error.is_none(), "client handshake failed: {error:?}");
+    assert!(error.is_none(), "client shell handshake failed: {error:?}");
+    assert!(
+        wait_for_message_variant(
+            &mut client_stream,
+            Duration::from_secs(5),
+            SERVER_MESSAGE_CLIENT_SHELL_SNAPSHOT,
+        )
+        .unwrap(),
+        "client shell should receive a complete snapshot before handoff"
+    );
 
     assert_ok(request(
         &api_socket,
@@ -888,8 +900,13 @@ fn live_handoff_preserves_pane_process_io() {
     ));
     drop(spawned);
     assert!(
-        wait_for_disconnect(&mut client_stream, Duration::from_secs(5)).unwrap(),
-        "connected clients should disconnect during live handoff"
+        wait_for_message_variant(
+            &mut client_stream,
+            Duration::from_secs(5),
+            SERVER_MESSAGE_SERVER_SHUTDOWN,
+        )
+        .unwrap(),
+        "connected client shell should receive live-handoff shutdown"
     );
     thread::sleep(Duration::from_millis(300));
     wait_for_api(&api_socket, Duration::from_secs(10));
@@ -934,6 +951,14 @@ fn live_handoff_preserves_pane_process_io() {
         Duration::from_secs(5),
     );
     wait_for_output(&api_socket, &second_pane_id, "second:after-handoff-sec");
+
+    let mut reattached_shell = UnixStream::connect(&client_socket).unwrap();
+    let (server_protocol, error) =
+        client_shell_handshake(&mut reattached_shell, protocol, 54, 23).unwrap();
+    assert_eq!(server_protocol, protocol);
+    assert!(error.is_none(), "reattached client shell failed: {error:?}");
+    wait_for_client_shell_bootstrap(&mut reattached_shell, Duration::from_secs(5))
+        .expect("fresh client shell should receive restored snapshot before pane content");
 
     let _ = request(
         &api_socket,
@@ -1020,10 +1045,13 @@ pathlib.Path({received:?}).write_text(data.hex())
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
-    let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
+    let (server_protocol, error) =
+        client_shell_handshake(&mut client_stream, protocol, 54, 23).unwrap();
     assert_eq!(server_protocol, protocol);
-    assert!(error.is_none(), "client handshake failed: {error:?}");
-    send_input(&mut client_stream, b"\x1b[13;2u").unwrap();
+    assert!(error.is_none(), "client shell handshake failed: {error:?}");
+    wait_for_client_shell_bootstrap(&mut client_stream, Duration::from_secs(5))
+        .expect("client shell should receive restored state before sending input");
+    send_client_shell_shift_enter(&mut client_stream, &pane_id).unwrap();
 
     wait_for_file_contains(&received_marker, "1b5b31333b3275", Duration::from_secs(5));
 
@@ -1111,10 +1139,13 @@ pathlib.Path({received:?}).write_text(data.hex())
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
     let mut client_stream = UnixStream::connect(&client_socket).unwrap();
-    let (server_protocol, error) = client_handshake(&mut client_stream, protocol, 80, 24).unwrap();
+    let (server_protocol, error) =
+        client_shell_handshake(&mut client_stream, protocol, 54, 23).unwrap();
     assert_eq!(server_protocol, protocol);
-    assert!(error.is_none(), "client handshake failed: {error:?}");
-    send_input(&mut client_stream, b"\x1b[13;2u").unwrap();
+    assert!(error.is_none(), "client shell handshake failed: {error:?}");
+    wait_for_client_shell_bootstrap(&mut client_stream, Duration::from_secs(5))
+        .expect("client shell should receive restored state before sending input");
+    send_client_shell_shift_enter(&mut client_stream, &pane_id).unwrap();
 
     wait_for_file_contains(
         &received_marker,

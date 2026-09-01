@@ -20,6 +20,7 @@ EXPECTED_ASSET_NAMES = {
     "windows-x86_64": "herdr-windows-x86_64.zip",
 }
 HIDDEN_SUBJECTS = (
+    "docs: publish release distribution",
     "docs: update website manifest",
     "docs: update preview manifest",
     "chore: approve contributor",
@@ -294,7 +295,7 @@ def main() -> int:
     sub = parser.add_subparsers(required=True)
 
     notes = sub.add_parser("notes")
-    notes.add_argument("--manifest", default="website/preview.json")
+    notes.add_argument("--manifest", default="distribution/preview.json")
     notes.add_argument("--previous")
     notes.add_argument("--commit", required=True)
     notes.add_argument("--build-id", required=True)
@@ -304,7 +305,7 @@ def main() -> int:
     notes.set_defaults(func=cmd_notes)
 
     manifest = sub.add_parser("manifest")
-    manifest.add_argument("--output", default="website/preview.json")
+    manifest.add_argument("--output", default="distribution/preview.json")
     manifest.add_argument("--repo", default="herdrdev/herdr")
     manifest.add_argument("--tag", required=True)
     manifest.add_argument("--build-id", required=True)
@@ -318,7 +319,7 @@ def main() -> int:
     manifest.set_defaults(func=cmd_manifest)
 
     current = sub.add_parser("current-commit")
-    current.add_argument("--manifest", default="website/preview.json")
+    current.add_argument("--manifest", default="distribution/preview.json")
     current.set_defaults(func=cmd_current_commit)
 
     select = sub.add_parser("select-commit")

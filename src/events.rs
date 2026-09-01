@@ -137,11 +137,6 @@ pub enum AppEvent {
     /// A pane child emitted a valid OSC 52 clipboard write. The main loop
     /// re-emits it through herdr's own clipboard writer.
     ClipboardWrite { content: Vec<u8> },
-    /// Prefix-mode ASCII input-source request, emitted on entering/leaving the ASCII input
-    /// realm. The foreground process applies the host-local TIS switch (`active = true`) /
-    /// restore (`active = false`): the client in server mode (via server forwarding), the
-    /// app itself in monolithic mode.
-    PrefixInputSource { active: bool },
     /// A pane child reported its shell current directory through terminal
     /// metadata such as OSC 7.
     TerminalCwdReported {
@@ -167,13 +162,6 @@ pub enum AppEvent {
         stdout: String,
         stderr: String,
         error: Option<String>,
-    },
-    /// A status-strip `#(command)` finished. `result` is the captured stdout on
-    /// success or an error description; either way it clears the command's
-    /// in-flight flag.
-    StatusCommandFinished {
-        command: String,
-        result: Result<String, String>,
     },
     /// Background `git worktree add` completed.
     WorktreeAddFinished(Box<WorktreeAddResult>),

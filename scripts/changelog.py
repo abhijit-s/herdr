@@ -16,7 +16,7 @@ DEFAULT_LIVE_MANIFEST_URL = "https://herdr.dev/latest.json"
 SECTION_RE = re.compile(r"^##\s+(?:\[(?P<bracketed>[^\]]+)\]|(?P<plain>.+?))\s*$", re.MULTILINE)
 VERSION_WITH_DATE_RE = re.compile(r"^(?P<version>.+?)\s+-\s+\d{4}-\d{2}-\d{2}$")
 DEFAULT_RELEASE_REPO = "herdrdev/herdr"
-DEFAULT_LATEST_JSON_PATH = Path("website/latest.json")
+DEFAULT_LATEST_JSON_PATH = Path("distribution/latest.json")
 DEFAULT_PRODUCT_ANNOUNCEMENT_PATH = Path("docs/next/product-announcement.json")
 PROTOCOL_SOURCE_PATH = Path("src/protocol/wire.rs")
 CORE_ASSET_TARGETS = (
@@ -619,11 +619,11 @@ def verify_asset_urls_resolve(assets: dict[str, str], label: str) -> None:
 def ensure_manifest_is_outdated(current_manifest: dict[str, Any], version: str) -> None:
     current_version = current_manifest.get("version")
     if not isinstance(current_version, str):
-        raise ChangelogError("website/latest.json is missing a string version")
+        raise ChangelogError("distribution/latest.json is missing a string version")
 
     if parse_version(current_version) >= parse_version(version):
         raise ChangelogError(
-            f"website/latest.json is already at v{normalize_version(current_version)}; expected something older than v{normalize_version(version)}"
+            f"distribution/latest.json is already at v{normalize_version(current_version)}; expected something older than v{normalize_version(version)}"
         )
 
 
@@ -696,7 +696,7 @@ def cmd_sync_latest_json(args: argparse.Namespace) -> int:
     print("next:")
     print(f"  git diff -- {manifest_path}")
     print(f"  git add {manifest_path}")
-    print(f"  git commit -m \"docs: update website manifest for v{version}\"")
+    print(f"  git commit -m \"docs: publish release distribution for v{version}\"")
     print("  git push")
     return 0
 
@@ -763,7 +763,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync_latest_json = subparsers.add_parser(
         "sync-latest-json",
-        help="Update website/latest.json from a published GitHub release",
+        help="Update distribution/latest.json from a published GitHub release",
     )
     sync_latest_json.add_argument("--version", required=True)
     sync_latest_json.add_argument("--repo", default=DEFAULT_RELEASE_REPO)

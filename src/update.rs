@@ -688,7 +688,7 @@ fn install_downloaded_update(mut update: DownloadedUpdate) -> Result<(), String>
 }
 
 #[cfg(windows)]
-const WINDOWS_INSTALLER: &str = include_str!("../website/install.ps1");
+const WINDOWS_INSTALLER: &str = include_str!("../distribution/install.ps1");
 
 #[cfg(windows)]
 struct DownloadedWindowsUpdate {
@@ -3588,26 +3588,26 @@ mod tests {
     }
 
     #[test]
-    fn checked_in_website_manifest_matches_update_schema() {
+    fn checked_in_distribution_manifest_matches_update_schema() {
         #[derive(Deserialize)]
         struct LegacyUpdateManifest {
             assets: BTreeMap<String, String>,
         }
 
-        let json = include_str!("../website/latest.json");
+        let json = include_str!("../distribution/latest.json");
         let legacy: LegacyUpdateManifest = serde_json::from_str(json)
-            .expect("website/latest.json should keep legacy string asset URLs");
+            .expect("distribution/latest.json should keep legacy string asset URLs");
         assert!(legacy.assets.len() >= 4);
 
-        let manifest: UpdateManifest =
-            serde_json::from_str(json).expect("website/latest.json should match updater schema");
+        let manifest: UpdateManifest = serde_json::from_str(json)
+            .expect("distribution/latest.json should match updater schema");
 
         assert!(!manifest
             .metadata_for_version(&Version::parse(&manifest.version).unwrap())
             .expect("metadata")
             .notes_body()
             .is_empty());
-        // website/latest.json describes the latest released binaries, not the
+        // distribution/latest.json describes the latest released binaries, not the
         // current unreleased checkout. Its protocol is updated by the release
         // flow together with the release assets.
         assert!(manifest.protocol.is_some());
