@@ -35,6 +35,7 @@ pub(crate) fn render_client_overlay(
     s: &ClientShellSnapshot,
     k: &LiveKeybindConfig,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     if !matches!(
         o,
@@ -50,26 +51,32 @@ pub(crate) fn render_client_overlay(
         }
     }
     match o {
-        ClientShellOverlay::Onboarding => render_onboarding_overlay(b, p),
-        ClientShellOverlay::ProductAnnouncement(v) => render_product_announcement_overlay(b, v, p),
+        ClientShellOverlay::Onboarding => render_onboarding_overlay(b, p, rounded),
+        ClientShellOverlay::ProductAnnouncement(v) => {
+            render_product_announcement_overlay(b, v, p, rounded)
+        }
         ClientShellOverlay::ReleaseNotes(v) => {
-            render_release_notes_overlay(b, v, &s.update_install_command, p)
+            render_release_notes_overlay(b, v, &s.update_install_command, p, rounded)
         }
-        ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
-        ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
-        ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
-        ClientShellOverlay::Navigator(v) => render_navigator_overlay(b, v, s, p),
-        ClientShellOverlay::Settings(v) => {
-            settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
-        }
+        ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p, rounded),
+        ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p, rounded),
+        ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p, rounded),
+        ClientShellOverlay::Navigator(v) => render_navigator_overlay(b, v, s, p, rounded),
+        ClientShellOverlay::Settings(v) => settings_overlay::render_settings_overlay(
+            b,
+            v,
+            s.integration_updates_available,
+            p,
+            rounded,
+        ),
         ClientShellOverlay::WorktreeCreate(v) => {
-            worktree_overlays::render_worktree_create_overlay(b, v, p)
+            worktree_overlays::render_worktree_create_overlay(b, v, p, rounded)
         }
         ClientShellOverlay::WorktreeOpen(v) => {
-            worktree_overlays::render_worktree_open_overlay(b, v, p)
+            worktree_overlays::render_worktree_open_overlay(b, v, p, rounded)
         }
         ClientShellOverlay::WorktreeRemove(v) => {
-            worktree_overlays::render_worktree_remove_overlay(b, v, p)
+            worktree_overlays::render_worktree_remove_overlay(b, v, p, rounded)
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }
@@ -81,6 +88,7 @@ pub(crate) fn render_global_menu(
     menu: &ClientGlobalMenuOverlay,
     snapshot: &ClientShellSnapshot,
     palette: &Palette,
+    rounded: bool,
 ) -> Option<Vec<(Rect, usize)>> {
     let items = super::super::global_menu::global_menu_items(snapshot);
     let screen = buffer.area;
@@ -109,6 +117,7 @@ pub(crate) fn render_global_menu(
         Rect::new(x, y, width, height),
         palette.accent,
         palette.panel_bg,
+        rounded,
     )?;
     let mut rows = Vec::new();
     for (index, (label, action)) in items.iter().enumerate() {
@@ -158,6 +167,7 @@ pub(crate) fn render_context_menu(
     buffer: &mut Buffer,
     menu: &ClientContextMenuOverlay,
     palette: &Palette,
+    rounded: bool,
 ) -> Option<Vec<(Rect, usize)>> {
     let items = menu.items();
     let screen = buffer.area;
@@ -182,7 +192,7 @@ pub(crate) fn render_context_menu(
             .saturating_add(screen.height.saturating_sub(height)),
     );
     let rect = Rect::new(x, y, width, height);
-    let inner = panel(buffer, rect, palette.accent, palette.panel_bg)?;
+    let inner = panel(buffer, rect, palette.accent, palette.panel_bg, rounded)?;
     let mut rows = Vec::new();
     for (index, item) in items.iter().enumerate() {
         let row_y = inner.y.saturating_add(index as u16);
@@ -211,10 +221,16 @@ fn panel(
     a: Rect,
     c: ratatui::style::Color,
     bg: ratatui::style::Color,
+    rounded: bool,
 ) -> Option<Rect> {
     if a.width < 2 || a.height < 2 {
         return None;
     }
+    let (top_left, top_right, bottom_left, bottom_right) = if rounded {
+        ("╭", "╮", "╰", "╯")
+    } else {
+        ("┌", "┐", "└", "┘")
+    };
     let background = Style::default().bg(bg).remove_modifier(Modifier::DIM);
     let border = Style::default().fg(c).bg(bg).remove_modifier(Modifier::DIM);
     for y in a.y..a.bottom() {
@@ -225,9 +241,9 @@ fn panel(
     for x in a.x..a.right() {
         b[(x, a.y)]
             .set_symbol(if x == a.x {
-                "┌"
+                top_left
             } else if x + 1 == a.right() {
-                "┐"
+                top_right
             } else {
                 "─"
             })
@@ -235,9 +251,9 @@ fn panel(
         let y = a.bottom() - 1;
         b[(x, y)]
             .set_symbol(if x == a.x {
-                "└"
+                bottom_left
             } else if x + 1 == a.right() {
-                "┘"
+                bottom_right
             } else {
                 "─"
             })
@@ -294,13 +310,14 @@ fn render_release_notes_overlay(
     notes: &crate::app::state::ReleaseNotesState,
     install_command: &str,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let outer = popup(
         b.area,
         crate::ui::RELEASE_NOTES_MODAL_SIZE.0,
         crate::ui::RELEASE_NOTES_MODAL_SIZE.1,
     )?;
-    let inner = panel(b, outer, p.accent, p.panel_bg)?;
+    let inner = panel(b, outer, p.accent, p.panel_bg, rounded)?;
     if inner.height < 8 || inner.width < 20 {
         return Some(OverlayRender::default());
     }
@@ -405,13 +422,14 @@ fn render_product_announcement_overlay(
     b: &mut Buffer,
     announcement: &crate::app::state::ProductAnnouncementState,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let outer = popup(
         b.area,
         crate::ui::PRODUCT_ANNOUNCEMENT_MODAL_SIZE.0,
         crate::ui::PRODUCT_ANNOUNCEMENT_MODAL_SIZE.1,
     )?;
-    let inner = panel(b, outer, p.accent, p.panel_bg)?;
+    let inner = panel(b, outer, p.accent, p.panel_bg, rounded)?;
     if inner.height < 8 || inner.width < 20 {
         return Some(OverlayRender::default());
     }
@@ -513,9 +531,9 @@ fn render_product_announcement_overlay(
     })
 }
 
-fn render_onboarding_overlay(b: &mut Buffer, p: &Palette) -> Option<OverlayRender> {
+fn render_onboarding_overlay(b: &mut Buffer, p: &Palette, rounded: bool) -> Option<OverlayRender> {
     let outer = popup(b.area, 64, 16)?;
-    let inner = panel(b, outer, p.accent, p.panel_bg)?;
+    let inner = panel(b, outer, p.accent, p.panel_bg, rounded)?;
     if inner.height < 11 {
         return Some(OverlayRender::default());
     }
@@ -607,9 +625,10 @@ fn render_rename_overlay(
     b: &mut Buffer,
     v: &ClientRenameOverlay,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 56, 7)?;
-    let i = panel(b, q, p.accent, p.panel_bg)?;
+    let i = panel(b, q, p.accent, p.panel_bg, rounded)?;
     put_text(
         b,
         i.x,
@@ -755,6 +774,7 @@ fn render_navigator_overlay(
     n: &ClientNavigatorOverlay,
     s: &ClientShellSnapshot,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let a = b.area;
     let mx = (a.width / 16).max(2);
@@ -765,7 +785,7 @@ fn render_navigator_overlay(
         a.width.saturating_sub(mx * 2).max(4),
         a.height.saturating_sub(my * 2).max(4),
     );
-    let i = panel(b, q, p.accent, p.panel_bg)?;
+    let i = panel(b, q, p.accent, p.panel_bg, rounded)?;
     let rows = client_navigator_rows(s, n);
     let search = if n.search_focused {
         format!(" / {}", n.query)
@@ -978,11 +998,12 @@ fn render_help_overlay(
     h: &ClientHelpOverlay,
     k: &LiveKeybindConfig,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     use ratatui::widgets::{Paragraph, Widget, Wrap};
 
     let q = popup(b.area, 76, 22)?;
-    let i = panel(b, q, p.accent, p.panel_bg)?;
+    let i = panel(b, q, p.accent, p.panel_bg, rounded)?;
     if i.width < 20 || i.height < 6 {
         return None;
     }
@@ -1110,9 +1131,10 @@ fn render_confirm_close_overlay(
     b: &mut Buffer,
     c: &ClientConfirmCloseOverlay,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 64, 6)?;
-    let i = panel(b, q, p.red, p.panel_bg)?;
+    let i = panel(b, q, p.red, p.panel_bg, rounded)?;
     put_text(
         b,
         i.x,
@@ -1166,4 +1188,30 @@ fn render_confirm_close_overlay(
         cursor: None,
         ..OverlayRender::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_corners_follow_the_rounded_flag() {
+        fn corners(rounded: bool) -> String {
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 6, 3));
+            panel(
+                &mut buffer,
+                Rect::new(0, 0, 6, 3),
+                ratatui::style::Color::White,
+                ratatui::style::Color::Reset,
+                rounded,
+            );
+            [(0, 0), (5, 0), (0, 2), (5, 2)]
+                .iter()
+                .map(|&(x, y)| buffer[(x, y)].symbol().to_owned())
+                .collect()
+        }
+
+        assert_eq!(corners(true), "╭╮╰╯");
+        assert_eq!(corners(false), "┌┐└┘");
+    }
 }

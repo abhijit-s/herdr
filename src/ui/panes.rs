@@ -434,7 +434,7 @@ fn render_pane_borders(
         let focused = pane_infos
             .iter()
             .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
-        let symbol = line_cell_symbol(line);
+        let symbol = line_cell_symbol(line, app.rounded_borders);
         if symbol.is_empty() {
             continue;
         }
@@ -626,7 +626,7 @@ fn render_pane_border_titles(
     }
 }
 
-fn line_cell_symbol(line: LineCell) -> &'static str {
+fn line_cell_symbol(line: LineCell, rounded: bool) -> &'static str {
     match (line.up, line.down, line.left, line.right) {
         (true, true, true, true) => "┼",
         (true, true, true, false) => "┤",
@@ -639,11 +639,20 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
         (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => {
             "─"
         }
-        (false, true, false, true) => "┌",
-        (false, true, true, false) => "┐",
-        (true, false, false, true) => "└",
-        (true, false, true, false) => "┘",
+        // Only true corners round; junction glyphs have no rounded Unicode variants.
+        (false, true, false, true) => corner(rounded, "╭", "┌"),
+        (false, true, true, false) => corner(rounded, "╮", "┐"),
+        (true, false, false, true) => corner(rounded, "╰", "└"),
+        (true, false, true, false) => corner(rounded, "╯", "┘"),
         _ => "",
+    }
+}
+
+fn corner(rounded: bool, round: &'static str, square: &'static str) -> &'static str {
+    if rounded {
+        round
+    } else {
+        square
     }
 }
 
@@ -906,6 +915,95 @@ mod tests {
 
         assert_eq!(left.borders, Borders::NONE);
         assert_eq!(right.borders, Borders::LEFT);
+    }
+
+    #[test]
+    fn rounded_flag_swaps_only_corner_glyphs() {
+        let corners = [
+            LineCell {
+                up: false,
+                down: true,
+                left: false,
+                right: true,
+            },
+            LineCell {
+                up: false,
+                down: true,
+                left: true,
+                right: false,
+            },
+            LineCell {
+                up: true,
+                down: false,
+                left: false,
+                right: true,
+            },
+            LineCell {
+                up: true,
+                down: false,
+                left: true,
+                right: false,
+            },
+        ];
+        let rounded: Vec<_> = corners.iter().map(|c| line_cell_symbol(*c, true)).collect();
+        let square: Vec<_> = corners
+            .iter()
+            .map(|c| line_cell_symbol(*c, false))
+            .collect();
+        assert_eq!(rounded, ["╭", "╮", "╰", "╯"]);
+        assert_eq!(square, ["┌", "┐", "└", "┘"]);
+
+        let junctions = [
+            LineCell {
+                up: true,
+                down: true,
+                left: true,
+                right: true,
+            },
+            LineCell {
+                up: true,
+                down: true,
+                left: true,
+                right: false,
+            },
+            LineCell {
+                up: true,
+                down: true,
+                left: false,
+                right: true,
+            },
+            LineCell {
+                up: true,
+                down: false,
+                left: true,
+                right: true,
+            },
+            LineCell {
+                up: false,
+                down: true,
+                left: true,
+                right: true,
+            },
+            LineCell {
+                up: true,
+                down: true,
+                left: false,
+                right: false,
+            },
+            LineCell {
+                up: false,
+                down: false,
+                left: true,
+                right: true,
+            },
+        ];
+        for cell in junctions {
+            assert_eq!(
+                line_cell_symbol(cell, true),
+                line_cell_symbol(cell, false),
+                "junction glyph must not change with the rounded flag"
+            );
+        }
     }
 
     #[test]

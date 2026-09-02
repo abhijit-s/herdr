@@ -566,6 +566,99 @@ fn tab_click_waits_for_release_and_drag_reorders_by_stable_id() {
 }
 
 #[test]
+fn jittery_click_below_drag_threshold_still_switches_tabs() {
+    // Real mice/trackpads routinely report a 1-2 cell wobble between
+    // mouse-down and mouse-up on a click; that wobble alone must not arm a
+    // reorder drag and swallow the click.
+    let mut projected = snapshot();
+    let mut tab = projected.tabs[0].clone();
+    tab.tab_id = "tab_2".into();
+    tab.number = 2;
+    tab.label = "2".into();
+    tab.focused = false;
+    projected.tabs.push(tab);
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("two tabs");
+    let second = state.hits.tabs[1].0;
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: second.x + 1,
+        row: second.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: second.x + 2,
+        row: second.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(
+        state.chrome_drag.is_none(),
+        "a 1-cell wobble should stay below TAB_DRAG_THRESHOLD"
+    );
+    let up = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: second.x + 2,
+        row: second.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        &up.actions[0],
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::TabFocus(target) if target.tab_id == "tab_2")
+    ));
+}
+
+#[test]
+fn tab_drag_that_ends_on_its_own_slot_still_focuses_tab() {
+    // Dropping a tab back onto its own slot is a no-op reorder; an
+    // armed-but-aborted drag must still act like the click it visually was.
+    let mut projected = snapshot();
+    let mut tab = projected.tabs[0].clone();
+    tab.tab_id = "tab_2".into();
+    tab.number = 2;
+    tab.label = "2".into();
+    tab.focused = false;
+    projected.tabs.push(tab);
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("two tabs");
+    let first = state.hits.tabs[0].0;
+
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: first.x + 1,
+        row: first.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: first.x.saturating_add(first.width / 2),
+        row: first.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        state.chrome_drag,
+        Some(ClientChromeDrag::Tab { ref tab_id, .. }) if tab_id == "tab_1"
+    ));
+    let up = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: first.x.saturating_add(first.width / 2),
+        row: first.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        &up.actions[0],
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::TabFocus(target) if target.tab_id == "tab_1")
+    ));
+}
+
+#[test]
 fn tab_drag_clears_its_drop_target_after_leaving_the_tab_row() {
     let mut projected = snapshot();
     for index in 2..=3 {

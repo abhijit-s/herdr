@@ -109,6 +109,7 @@ pub(super) fn render_visible_notification(
     default_position: crate::config::ToastHerdrPosition,
     top_offset: u16,
     palette: &Palette,
+    rounded: bool,
 ) -> Rect {
     if area.is_empty() {
         return Rect::default();
@@ -141,8 +142,14 @@ pub(super) fn render_visible_notification(
     .clamp(area.y, max_y);
     let rect = Rect::new(x, y, width, height);
     Clear.render(rect, buffer);
+    let border_set = if rounded {
+        ratatui::symbols::border::ROUNDED
+    } else {
+        ratatui::symbols::border::PLAIN
+    };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_set(border_set)
         .border_style(Style::default().fg(palette.overlay0))
         .style(Style::default().bg(palette.panel_bg));
     let inner = block.inner(rect);
@@ -409,6 +416,7 @@ mod tests {
                     position,
                     1,
                     &palette,
+                    true,
                 );
                 assert!(rect.y >= area.y);
                 assert!(rect.bottom() <= area.bottom());

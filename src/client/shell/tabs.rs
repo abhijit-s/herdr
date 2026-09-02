@@ -465,3 +465,41 @@ fn draw_tab_caps(
         buffer[(x, rect.y)].set_symbol(symbol).set_style(cap_style);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_labels_sit_on_the_exact_centre_column() {
+        // MIN_TAB_WIDTH forces short labels into a wider tab; an odd padding
+        // budget used to push the label one column left of centre.
+        for name in ["1", "ab", "abc", "main", "log", "a"] {
+            let width = tab_width(name);
+            let label = display_width(name);
+            let padding = width - label;
+            assert_eq!(
+                padding % 2,
+                0,
+                "{name:?} has odd padding {padding} in width {width}"
+            );
+            assert!(width >= MIN_TAB_WIDTH, "{name:?} narrower than the minimum");
+        }
+    }
+
+    #[test]
+    fn cap_glyphs_shape_only_the_configured_style() {
+        use crate::config::TabCapStyleConfig as Style;
+
+        assert_eq!(tab_cap_glyphs(Style::Block), None);
+        assert_eq!(tab_cap_glyphs(Style::Round), Some(("◖", "◗")));
+        assert_eq!(tab_cap_glyphs(Style::Slant), Some(("╱", "╲")));
+        assert_eq!(
+            tab_cap_glyphs(Style::Powerline),
+            Some(("\u{e0b6}", "\u{e0b4}"))
+        );
+
+        assert_eq!(tab_gap(Style::Block), 1);
+        assert_eq!(tab_gap(Style::Round), 0);
+    }
+}

@@ -4,9 +4,10 @@ pub(super) fn render_worktree_create_overlay(
     b: &mut Buffer,
     create: &ClientWorktreeCreateOverlay,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let popup = popup(b.area, 68, 12)?;
-    let inner = panel(b, popup, p.accent, p.panel_bg)?;
+    let inner = panel(b, popup, p.accent, p.panel_bg, rounded)?;
     put_text(
         b,
         inner.x,
@@ -116,10 +117,11 @@ pub(super) fn render_worktree_open_overlay(
     b: &mut Buffer,
     open: &ClientWorktreeOpenOverlay,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let popup_height = (open.entries.len().saturating_mul(2) + 7).clamp(12, 26) as u16;
     let popup = popup(b.area, 96, popup_height)?;
-    let inner = panel(b, popup, p.accent, p.panel_bg)?;
+    let inner = panel(b, popup, p.accent, p.panel_bg, rounded)?;
     put_text(
         b,
         inner.x,
@@ -302,9 +304,10 @@ pub(super) fn render_worktree_remove_overlay(
     b: &mut Buffer,
     remove: &ClientWorktreeRemoveOverlay,
     p: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let popup = popup(b.area, 72, 10)?;
-    let inner = panel(b, popup, p.red, p.panel_bg)?;
+    let inner = panel(b, popup, p.red, p.panel_bg, rounded)?;
     put_text(
         b,
         inner.x,

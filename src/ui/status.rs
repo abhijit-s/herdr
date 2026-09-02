@@ -54,6 +54,7 @@ pub(crate) fn render_copy_feedback_buffer(
     offset_rows: u16,
     position: ToastClipboardPosition,
     palette: &Palette,
+    rounded: bool,
 ) {
     let feedback_area = copy_feedback_rect(area, feedback, offset_rows, position);
     if feedback_area.is_empty() {
@@ -61,8 +62,14 @@ pub(crate) fn render_copy_feedback_buffer(
     }
 
     Clear.render(feedback_area, buffer);
+    let border_set = if rounded {
+        ratatui::symbols::border::ROUNDED
+    } else {
+        ratatui::symbols::border::PLAIN
+    };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_set(border_set)
         .border_style(Style::default().fg(palette.green))
         .style(Style::default().bg(palette.panel_bg));
     let inner = block.inner(feedback_area);

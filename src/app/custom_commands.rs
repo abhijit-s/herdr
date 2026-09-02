@@ -585,6 +585,7 @@ mod tests {
         crate::config::CustomCommandKeybind {
             bindings: crate::config::ActionKeybinds::prefix("z"),
             label: "prefix+z".into(),
+            keybind_display: None,
             command: "secret-command --token hidden".into(),
             action,
             description: Some("safe description".into()),

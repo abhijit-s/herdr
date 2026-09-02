@@ -348,6 +348,7 @@ fn custom_binding_invokes_only_the_endpoint_manifest_id() {
     let binding = crate::config::CustomCommandKeybind {
         bindings: crate::config::ActionKeybinds::prefix("z"),
         label: "prefix+z".into(),
+        keybind_display: None,
         command: "secret-command --token hidden".into(),
         action: crate::config::CustomCommandAction::Shell,
         description: None,
@@ -391,6 +392,7 @@ fn plugin_command_carries_client_owned_selection_coordinates() {
     let binding = crate::config::CustomCommandKeybind {
         bindings: crate::config::ActionKeybinds::prefix("p"),
         label: "prefix+p".into(),
+        keybind_display: None,
         command: "plugin.action".into(),
         action: crate::config::CustomCommandAction::PluginAction,
         description: None,
@@ -481,6 +483,7 @@ fn custom_binding_missing_from_endpoint_manifest_is_not_forwarded() {
     let binding = crate::config::CustomCommandKeybind {
         bindings: crate::config::ActionKeybinds::prefix("z"),
         label: "prefix+z".into(),
+        keybind_display: None,
         command: "secret-command".into(),
         action: crate::config::CustomCommandAction::Shell,
         description: None,

@@ -552,6 +552,7 @@ fn popup_command_blocks_underlying_input_until_surface_or_error() {
     let binding = crate::config::CustomCommandKeybind {
         bindings: crate::config::ActionKeybinds::prefix("t"),
         label: "prefix+t".into(),
+        keybind_display: None,
         command: "secret-popup-command".into(),
         action: crate::config::CustomCommandAction::Popup,
         description: None,
@@ -605,6 +606,7 @@ fn popup_command_blocks_underlying_input_until_surface_or_error() {
     let binding = crate::config::CustomCommandKeybind {
         bindings: crate::config::ActionKeybinds::prefix("t"),
         label: "prefix+t".into(),
+        keybind_display: None,
         command: "secret-popup-command".into(),
         action: crate::config::CustomCommandAction::Popup,
         description: None,

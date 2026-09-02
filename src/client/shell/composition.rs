@@ -294,6 +294,7 @@ impl ClientShellState {
                         self.config.toast_position,
                         u16::from(has_config_diagnostic),
                         &self.config.palette,
+                        self.config.rounded_borders,
                     )
                 } else {
                     notifications::render_mobile_notification_banner(
@@ -330,6 +331,7 @@ impl ClientShellState {
                 offset,
                 self.config.clipboard_toast_position,
                 &self.config.palette,
+                self.config.rounded_borders,
             );
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
@@ -343,6 +345,11 @@ impl ClientShellState {
                 let mut composed = frame.to_ratatui_buffer()?;
                 let block = ratatui::widgets::Block::default()
                     .borders(ratatui::widgets::Borders::ALL)
+                    .border_set(if self.config.rounded_borders {
+                        ratatui::symbols::border::ROUNDED
+                    } else {
+                        ratatui::symbols::border::PLAIN
+                    })
                     .border_style(ratatui::style::Style::default().fg(self.config.palette.accent))
                     .title(popup.title.clone())
                     .style(ratatui::style::Style::default().bg(self.config.palette.panel_bg));
@@ -392,8 +399,12 @@ impl ClientShellState {
         if let Some(overlay) = self.overlay.as_ref() {
             let mut composed = frame.to_ratatui_buffer()?;
             let cursor = if let ClientShellOverlay::ContextMenu(menu) = overlay {
-                self.hits.context_menu_rows =
-                    render::render_context_menu(&mut composed, menu, &self.config.palette)?;
+                self.hits.context_menu_rows = render::render_context_menu(
+                    &mut composed,
+                    menu,
+                    &self.config.palette,
+                    self.config.rounded_borders,
+                )?;
                 None
             } else if let ClientShellOverlay::GlobalMenu(menu) = overlay {
                 self.hits.global_menu_rows = render::render_global_menu(
@@ -402,6 +413,7 @@ impl ClientShellState {
                     menu,
                     snapshot,
                     &self.config.palette,
+                    self.config.rounded_borders,
                 )?;
                 None
             } else {
@@ -411,6 +423,7 @@ impl ClientShellState {
                     snapshot,
                     &self.config.keybinds,
                     &self.config.palette,
+                    self.config.rounded_borders,
                 )?;
                 self.hits.overlay_primary = rendered.primary;
                 self.hits.overlay_clear = rendered.clear;

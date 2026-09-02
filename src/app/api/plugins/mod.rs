@@ -775,6 +775,9 @@ fn manifest_actions(
 
 /// Availability-filtered plugin actions collected for the command palette.
 /// Thin public wrapper over the module-private `manifest_actions` iterator.
+// Unread pending the command-palette client-shell port; called from
+// src/app/command_palette.rs once that lands.
+#[allow(dead_code)]
 pub(crate) fn palette_plugin_actions(
     plugins: &crate::app::state::InstalledPluginRegistry,
 ) -> Vec<PluginActionInfo> {

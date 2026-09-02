@@ -38,6 +38,7 @@ pub(super) fn render_settings_overlay(
     settings: &ClientSettingsOverlay,
     integration_updates_available: bool,
     palette: &Palette,
+    rounded: bool,
 ) -> Option<OverlayRender> {
     let integration_height = 14u16
         .saturating_add(settings.integrations.len().max(1) as u16)
@@ -48,7 +49,7 @@ pub(super) fn render_settings_overlay(
         22
     };
     let popup = popup(buffer.area, 76, height)?;
-    let inner = panel(buffer, popup, palette.accent, palette.panel_bg)?;
+    let inner = panel(buffer, popup, palette.accent, palette.panel_bg, rounded)?;
     if inner.width < 20 || inner.height < 8 {
         return None;
     }
