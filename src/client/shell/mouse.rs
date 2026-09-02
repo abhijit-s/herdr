@@ -3,6 +3,12 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 const SELECTION_AUTOSCROLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(30);
 
+/// Minimum pointer travel before a tab press arms a reorder drag instead of
+/// registering as a click. Real mice/trackpads routinely report a 1-2 cell
+/// wobble between mouse-down and mouse-up on a click; a lower threshold lets
+/// that wobble alone arm a drag and swallow the click.
+const TAB_DRAG_THRESHOLD: u16 = 3;
+
 impl ClientShellState {
     fn set_sidebar_width_from_column(&mut self, column: u16, outcome: &mut ClientShellInput) {
         let (min, max) = crate::config::validated_sidebar_bounds(
@@ -1128,7 +1134,7 @@ impl ClientShellState {
                     .column
                     .abs_diff(press.start_column)
                     .max(mouse.row.abs_diff(press.start_row));
-                if delta >= 1 {
+                if delta >= TAB_DRAG_THRESHOLD {
                     if let Some(insert_index) = self.tab_drop_index_at(point) {
                         self.chrome_drag = Some(ClientChromeDrag::Tab {
                             tab_id: press.tab_id.clone(),
@@ -1152,6 +1158,13 @@ impl ClientShellState {
                         ..
                     } => {
                         let insert_index = self.tab_drop_index_at(point);
+                        let source_index = self.snapshot.as_deref().and_then(|snapshot| {
+                            snapshot
+                                .tabs
+                                .iter()
+                                .filter(|tab| tab.workspace_id == workspace_id)
+                                .position(|tab| tab.tab_id == tab_id)
+                        });
                         let valid_drop = self.snapshot.as_deref().is_some_and(|snapshot| {
                             snapshot.focused_workspace_id.as_deref() == Some(workspace_id.as_str())
                                 && snapshot.tabs.iter().any(|tab| {
@@ -1166,7 +1179,24 @@ impl ClientShellState {
                                             .count()
                                 })
                         });
-                        if valid_drop {
+                        // Dropping a tab back onto its own slot is a no-op reorder;
+                        // treat it as the plain click it visually was instead of
+                        // sending a self-move, so an armed-but-aborted drag still
+                        // focuses the tab.
+                        let is_self_drop = match (source_index, insert_index) {
+                            (Some(source), Some(insert)) => {
+                                insert == source || insert == source + 1
+                            }
+                            _ => false,
+                        };
+                        if valid_drop && is_self_drop {
+                            self.push_endpoint_method(
+                                crate::api::schema::Method::TabFocus(
+                                    crate::api::schema::TabTarget { tab_id },
+                                ),
+                                outcome,
+                            );
+                        } else if valid_drop {
                             self.push_endpoint_method(
                                 crate::api::schema::Method::TabMove(
                                     crate::api::schema::TabMoveParams {

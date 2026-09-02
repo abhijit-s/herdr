@@ -23,19 +23,19 @@ pub(crate) fn render_tab_bar(
         .collect::<Vec<_>>();
     let desired_widths = tabs
         .iter()
-        .map(|tab| {
-            let label = tab_label(tab);
-            display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
-        })
+        .map(|tab| tab_width(&tab_label(tab)))
         .collect::<Vec<_>>();
     let content = tab_bar_content_area(snapshot, area);
     let mouse_chrome = config.mouse_capture;
     let new_tab_width = if mouse_chrome { NEW_TAB_WIDTH } else { 0 };
+    let gap = tab_gap(config.tab_style);
     let desired_total = desired_widths
         .iter()
         .copied()
         .fold(0_u16, u16::saturating_add)
-        .saturating_add(tabs.len().saturating_sub(1).min(u16::MAX as usize) as u16)
+        .saturating_add(
+            (tabs.len().saturating_sub(1).min(u16::MAX as usize) as u16).saturating_mul(gap),
+        )
         .saturating_add(new_tab_width);
     let overflow =
         desired_total > content.width && (!mouse_chrome || content.width >= MIN_TAB_STRIP_WIDTH);
@@ -47,12 +47,13 @@ pub(crate) fn render_tab_bar(
     } else {
         content.width.saturating_sub(new_tab_width)
     };
-    let max_scroll = max_tab_scroll(&desired_widths, available);
+    let max_scroll = max_tab_scroll(&desired_widths, available, gap);
     if !overflow {
         *tab_scroll = 0;
     } else if *reveal_focused_tab {
         if let Some(focused) = tabs.iter().position(|tab| tab.focused) {
-            *tab_scroll = centered_tab_scroll(focused, &desired_widths, available).min(max_scroll);
+            *tab_scroll =
+                centered_tab_scroll(focused, &desired_widths, available, gap).min(max_scroll);
         }
     } else {
         *tab_scroll = (*tab_scroll).min(max_scroll);
@@ -126,10 +127,13 @@ pub(crate) fn render_tab_bar(
             right_padding = padding.saturating_sub(left) as usize,
         );
         put_text(buffer, rect.x, rect.y, rect.width, &text, style);
+        if let Some(tab_bg) = style.bg {
+            draw_tab_caps(buffer, rect, tab_bg, palette.panel_bg, config.tab_style);
+        }
         hits.tabs.push((rect, tab.tab_id.clone()));
         first_visible.get_or_insert(index);
         last_visible = Some(index);
-        x = x.saturating_add(width + 1);
+        x = x.saturating_add(width + gap);
         if width < desired {
             break;
         }
@@ -330,7 +334,7 @@ fn tab_drop_indicator_x(
     None
 }
 
-fn centered_tab_scroll(focused: usize, widths: &[u16], available: u16) -> usize {
+fn centered_tab_scroll(focused: usize, widths: &[u16], available: u16, gap: u16) -> usize {
     let mut best = focused;
     let mut best_distance = u16::MAX;
     for start in 0..=focused {
@@ -340,7 +344,7 @@ fn centered_tab_scroll(focused: usize, widths: &[u16], available: u16) -> usize 
             .enumerate()
             .skip(start)
             .take(focused.saturating_sub(start))
-            .fold(0u16, |width, (_, tab)| width.saturating_add(tab + 1));
+            .fold(0u16, |width, (_, tab)| width.saturating_add(tab + gap));
         if before >= available {
             continue;
         }
@@ -355,13 +359,15 @@ fn centered_tab_scroll(focused: usize, widths: &[u16], available: u16) -> usize 
     best
 }
 
-fn max_tab_scroll(widths: &[u16], available: u16) -> usize {
+fn max_tab_scroll(widths: &[u16], available: u16, gap: u16) -> usize {
     (0..widths.len())
-        .find(|start| last_visible_tab(*start, widths, available) == widths.len().checked_sub(1))
+        .find(|start| {
+            last_visible_tab(*start, widths, available, gap) == widths.len().checked_sub(1)
+        })
         .unwrap_or(0)
 }
 
-fn last_visible_tab(start: usize, widths: &[u16], available: u16) -> Option<usize> {
+fn last_visible_tab(start: usize, widths: &[u16], available: u16, gap: u16) -> Option<usize> {
     let mut remaining = available;
     let mut last = None;
     for (index, width) in widths.iter().copied().enumerate().skip(start) {
@@ -372,9 +378,23 @@ fn last_visible_tab(start: usize, widths: &[u16], available: u16) -> Option<usiz
         if width >= remaining {
             break;
         }
-        remaining = remaining.saturating_sub(width.saturating_add(1));
+        remaining = remaining.saturating_sub(width.saturating_add(gap));
     }
     last
+}
+
+/// Desired tab width for a label: padded to a minimum, then widened by one if
+/// the padding budget is odd so the label lands on the exact centre column.
+/// `MIN_TAB_WIDTH` forces short labels into a wider tab; an odd padding
+/// budget has no centre column and pushes the label one column left of it.
+fn tab_width(label: &str) -> u16 {
+    let label_width = display_width(label);
+    let width = label_width.saturating_add(4).max(MIN_TAB_WIDTH);
+    if (width - label_width).is_multiple_of(2) {
+        width
+    } else {
+        width.saturating_add(1)
+    }
 }
 
 fn tab_label(tab: &ClientShellTab) -> String {
@@ -382,5 +402,66 @@ fn tab_label(tab: &ClientShellTab) -> String {
         format!("{} Z", tab.label)
     } else {
         tab.label.clone()
+    }
+}
+
+/// Leading and trailing cap glyphs for a tab, drawn in the tab's own colour on
+/// the bar background so the tab reads as a shaped tile rather than a rectangle.
+///
+/// Caps sit in the tab rect's outermost padding column, so they cost no extra
+/// width and leave hit areas, scrolling, and width math untouched.
+fn tab_cap_glyphs(style: crate::config::TabCapStyleConfig) -> Option<(&'static str, &'static str)> {
+    use crate::config::TabCapStyleConfig as Style;
+    match style {
+        Style::Block => None,
+        Style::Round => Some(("\u{25d6}", "\u{25d7}")),
+        Style::Slant => Some(("\u{2571}", "\u{2572}")),
+        // Powerline private-use caps; these need a Nerd Font to resolve.
+        Style::Powerline => Some(("\u{e0b6}", "\u{e0b4}")),
+    }
+}
+
+/// Minimum tab width that still leaves room for a label between two caps.
+const MIN_CAPPED_TAB_WIDTH: u16 = 3;
+
+/// Blank columns between adjacent tabs.
+///
+/// Flat tabs need a blank column so they do not butt together. Cap glyphs taper
+/// at each end and already separate neighbours, so a blank column there reads as
+/// too wide a gap.
+fn tab_gap(style: crate::config::TabCapStyleConfig) -> u16 {
+    if tab_cap_glyphs(style).is_some() {
+        0
+    } else {
+        1
+    }
+}
+
+fn draw_tab_caps(
+    buffer: &mut Buffer,
+    rect: Rect,
+    tab_bg: ratatui::style::Color,
+    bar_bg: ratatui::style::Color,
+    style: crate::config::TabCapStyleConfig,
+) {
+    let Some((left_cap, right_cap)) = tab_cap_glyphs(style) else {
+        return;
+    };
+    // A clipped tab has no padding to spare; keep its label over its caps.
+    if rect.width < MIN_CAPPED_TAB_WIDTH {
+        return;
+    }
+    let cap_style = Style::default().fg(tab_bg).bg(bar_bg);
+    let right_x = rect.x.saturating_add(rect.width).saturating_sub(1);
+    let area = buffer.area;
+    for (x, symbol) in [(rect.x, left_cap), (right_x, right_cap)] {
+        if x < area.x
+            || x >= area.x.saturating_add(area.width)
+            || rect.y < area.y
+            || rect.y >= area.y.saturating_add(area.height)
+        {
+            continue;
+        }
+        buffer[(x, rect.y)].set_symbol(symbol).set_style(cap_style);
     }
 }

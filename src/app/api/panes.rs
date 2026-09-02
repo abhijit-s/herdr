@@ -711,7 +711,7 @@ impl App {
         let amount = params
             .amount
             .filter(|amount| amount.is_finite())
-            .unwrap_or(crate::config::DEFAULT_RESIZE_STEP)
+            .unwrap_or(self.state.keybinds.resize_step)
             .abs()
             .min(crate::config::MAX_RESIZE_STEP);
         let direction: NavDirection = params.direction.into();
