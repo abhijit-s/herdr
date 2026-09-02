@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 mod actions;
 mod agent_sidebar;
+mod command_palette;
 mod composition;
 mod config;
 mod context_menu;
@@ -47,28 +48,31 @@ use crate::protocol::{
 #[cfg(test)]
 use crate::raw_input::RawInputEvent;
 
-fn delete_overlay_word(rename: &mut ClientRenameOverlay) {
-    if rename.replace_on_type {
-        rename.input.clear();
-        rename.replace_on_type = false;
-        return;
+fn delete_trailing_word(input: &mut String) {
+    while input.chars().last().is_some_and(char::is_whitespace) {
+        input.pop();
     }
-    while rename.input.chars().last().is_some_and(char::is_whitespace) {
-        rename.input.pop();
-    }
-    let Some(word) = rename
-        .input
+    let Some(word) = input
         .chars()
         .last()
         .map(|character| character.is_alphanumeric() || character == '_')
     else {
         return;
     };
-    while rename.input.chars().last().is_some_and(|character| {
+    while input.chars().last().is_some_and(|character| {
         !character.is_whitespace() && (character.is_alphanumeric() || character == '_') == word
     }) {
-        rename.input.pop();
+        input.pop();
     }
+}
+
+fn delete_overlay_word(rename: &mut ClientRenameOverlay) {
+    if rename.replace_on_type {
+        rename.input.clear();
+        rename.replace_on_type = false;
+        return;
+    }
+    delete_trailing_word(&mut rename.input);
 }
 
 fn target_event_message(target: ClientInputTarget, event: ClientPaneInputEvent) -> ClientMessage {

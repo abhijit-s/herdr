@@ -1,5 +1,6 @@
 use super::*;
 
+mod command_palette_overlay;
 mod settings_overlay;
 mod worktree_overlays;
 
@@ -13,6 +14,9 @@ pub(crate) struct OverlayRender {
     pub(crate) navigator_rows: Vec<(Rect, usize)>,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
+    pub(crate) command_palette_popup: Rect,
+    pub(crate) command_palette_rows: Vec<(Rect, usize)>,
+    pub(crate) command_palette_list_height: usize,
     pub(crate) help_popup: Rect,
     pub(crate) help_scrollbar: Rect,
     pub(crate) help_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -61,6 +65,9 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p, rounded),
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p, rounded),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p, rounded),
+        ClientShellOverlay::CommandPalette(v) => {
+            command_palette_overlay::render_command_palette_overlay(b, v, p, rounded)
+        }
         ClientShellOverlay::Navigator(v) => render_navigator_overlay(b, v, s, p, rounded),
         ClientShellOverlay::Settings(v) => settings_overlay::render_settings_overlay(
             b,

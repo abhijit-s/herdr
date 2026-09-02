@@ -372,7 +372,7 @@ pub struct CommandPaletteConfig {
 }
 
 /// Which catalog sources feed the command palette. All enabled by default.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct CommandPaletteSources {
     pub built_in: bool,

@@ -1,5 +1,19 @@
 use super::*;
 
+/// The explicit `label` the endpoint's config set for a command, or `None` when
+/// it was label-less.
+///
+/// `keybind_display` is the endpoint's own record of "an explicit label was
+/// set", so this reads that signal rather than inferring it by comparing
+/// `binding_label` against the chords — a comparison that would quietly
+/// mis-classify a label deliberately set equal to its chord.
+fn explicit_command_label(command: &crate::protocol::ClientShellCommand) -> Option<String> {
+    command
+        .keybind_display
+        .is_some()
+        .then(|| command.binding_label.clone())
+}
+
 pub(super) fn merged_config_diagnostic(
     local: Option<&str>,
     endpoint: Option<&str>,
@@ -105,6 +119,7 @@ impl ClientShellConfig {
             tab_bar_position: config.ui.tab_bar_position,
             tab_style: config.ui.tab_style,
             rounded_borders: config.ui.rounded_borders,
+            command_palette_sources: config.command_palette.sources,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
@@ -208,7 +223,10 @@ impl ClientShellConfig {
                         } else {
                             crate::config::BindingConfig::Many(command.binding_labels.clone())
                         },
-                        label: None,
+                        // Carried so the palette can name the command the way its
+                        // author did; the resolver derives the keybind column from
+                        // whichever chords survive collision resolution here.
+                        label: explicit_command_label(command),
                         // The client never executes this field; preserve the opaque endpoint ID
                         // through the shared config collision resolver.
                         command: command.command_id.clone(),
@@ -247,7 +265,7 @@ impl ClientShellConfig {
                             &command.binding_labels,
                         )?,
                         label: command.binding_label.clone(),
-                        keybind_display: None,
+                        keybind_display: command.keybind_display.clone(),
                         command: command.command_id.clone(),
                         action: command.action.into(),
                         description: command.description.clone(),
@@ -334,6 +352,9 @@ impl ClientShellConfig {
         if !invalid_section("experimental") {
             self.switch_ascii_input_source_in_prefix =
                 config.experimental.switch_ascii_input_source_in_prefix;
+        }
+        if !invalid_section("command_palette") {
+            self.command_palette_sources = config.command_palette.sources;
         }
 
         diagnostics

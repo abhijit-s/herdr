@@ -21,6 +21,9 @@ pub(crate) struct ClientShellConfig {
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) tab_style: crate::config::TabCapStyleConfig,
     pub(super) rounded_borders: bool,
+    /// `[command_palette].sources` toggles. Read straight from config so the
+    /// palette's per-source gating never depends on resolved catalog contents.
+    pub(super) command_palette_sources: crate::config::CommandPaletteSources,
     pub(super) hide_tab_bar_when_single_tab: bool,
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
@@ -112,6 +115,10 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_rows: Vec<(Rect, usize)>,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
+    pub(super) command_palette_popup: Rect,
+    /// Row rect paired with its position in the palette's `filtered` list.
+    pub(super) command_palette_rows: Vec<(Rect, usize)>,
+    pub(super) command_palette_list_height: usize,
     pub(super) help_popup: Rect,
     pub(super) help_scrollbar: Rect,
     pub(super) help_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -269,6 +276,7 @@ pub(super) enum ClientShellOverlayKind {
     ContextMenu,
     GlobalMenu,
     Settings,
+    CommandPalette,
 }
 
 #[derive(Debug)]
@@ -532,6 +540,76 @@ pub(super) struct ClientContextMenuItem {
     pub(super) action: ClientContextMenuAction,
 }
 
+/// Which catalog a palette row came from. Rendered as a dim right-aligned tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClientPaletteSource {
+    BuiltIn,
+    Plugin,
+    Custom,
+}
+
+impl ClientPaletteSource {
+    pub(super) fn tag(self) -> &'static str {
+        match self {
+            Self::BuiltIn => "built-in",
+            Self::Plugin => "plugin",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+/// What running a palette row does. Every variant resolves to a dispatch the
+/// client already owns: built-ins and custom commands replay the exact
+/// `KeybindMatch` a keypress would have produced, and plugin actions go through
+/// the public `plugin.action.invoke` method.
+#[derive(Debug, Clone)]
+pub(super) enum ClientPaletteHandle {
+    Action(crate::input::KeybindAction),
+    Command(Box<crate::config::CustomCommandKeybind>),
+    PluginAction {
+        plugin_id: String,
+        action_id: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ClientPaletteEntry {
+    pub(super) name: String,
+    /// Dimmed secondary text drawn between the name and the keybind/tag columns.
+    pub(super) description: Option<String>,
+    /// Right-aligned chord. Blank when the name already is the chord.
+    pub(super) keybinding: Option<String>,
+    pub(super) source: ClientPaletteSource,
+    pub(super) handle: ClientPaletteHandle,
+}
+
+impl ClientPaletteEntry {
+    /// Dedup key = handle identity, never display name. Two plugins that both
+    /// title an action "build" keep distinct keys through their qualified ids.
+    pub(super) fn identity_key(&self) -> String {
+        match &self.handle {
+            ClientPaletteHandle::Action(action) => format!("action:{action:?}"),
+            ClientPaletteHandle::Command(command) => format!("command:{}", command.command),
+            ClientPaletteHandle::PluginAction {
+                plugin_id,
+                action_id,
+            } => format!("plugin:{plugin_id}.{action_id}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ClientCommandPaletteOverlay {
+    pub(super) query: String,
+    /// Full catalog, sorted by name and deduped by handle identity.
+    pub(super) entries: Vec<ClientPaletteEntry>,
+    /// Indices into `entries`, best match first.
+    pub(super) filtered: Vec<usize>,
+    pub(super) selected: usize,
+    /// A `plugin.action.list` request is in flight for this palette.
+    pub(super) loading_plugin_actions: bool,
+}
+
 #[derive(Debug)]
 pub(super) struct ClientConfirmCloseOverlay {
     pub(super) workspace_id: String,
@@ -554,6 +632,7 @@ pub(super) enum ClientShellOverlay {
     ContextMenu(ClientContextMenuOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
+    CommandPalette(ClientCommandPaletteOverlay),
 }
 
 impl ClientShellOverlay {
@@ -572,6 +651,7 @@ impl ClientShellOverlay {
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
+            Self::CommandPalette(_) => ClientShellOverlayKind::CommandPalette,
         }
     }
 }
@@ -588,6 +668,7 @@ pub(super) enum PendingEndpointKind {
     ReloadConfig,
     IntegrationList,
     IntegrationInstall,
+    CommandPaletteActionList,
     PrepareWorktreeCreate {
         workspace_id: String,
     },

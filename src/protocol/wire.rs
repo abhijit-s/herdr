@@ -953,8 +953,13 @@ impl From<ClientShellCommandAction> for crate::config::CustomCommandAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientShellCommand {
     pub command_id: String,
+    /// Display name: the author's `label` when they set one, else the chord.
     pub binding_label: String,
     pub binding_labels: Vec<String>,
+    /// `Some` only when the author set an explicit `label`, so the client can
+    /// tell a named command from one whose name *is* its chord without
+    /// inferring it by comparing `binding_label` against the chords.
+    pub keybind_display: Option<String>,
     pub action: ClientShellCommandAction,
     pub description: Option<String>,
 }
@@ -2373,6 +2378,7 @@ mod tests {
                 command_id: "cmd_0123456789abcdef0123456789abcdef".into(),
                 binding_label: "prefix+z".into(),
                 binding_labels: vec!["prefix+z".into()],
+                keybind_display: None,
                 action: ClientShellCommandAction::Shell,
                 description: Some("deploy".into()),
             }],

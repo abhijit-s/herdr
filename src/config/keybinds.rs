@@ -304,9 +304,6 @@ pub struct CustomCommandKeybind {
     /// Chord to surface in the palette's keybind column. Populated only when the
     /// config set an explicit `label` (so the name is no longer the chord);
     /// `None` leaves the column blank, matching the label-less default.
-    // Unread pending the command-palette client-shell port; rendered by
-    // src/ui/command_palette.rs once that lands.
-    #[allow(dead_code)]
     pub keybind_display: Option<String>,
     pub command: String,
     pub action: CustomCommandAction,

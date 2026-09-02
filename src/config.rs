@@ -22,10 +22,10 @@ pub use self::{
         IndexedKeybind, Keybinds, LiveKeybindConfig,
     },
     model::{
-        validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
-        ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig, ShellModeConfig,
-        SidebarCollapsedModeConfig, StatusIndicatorStyle, TabBarPositionConfig, TabCapStyleConfig,
-        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
+        validated_sidebar_bounds, AgentPanelSortConfig, CommandPaletteSources, Config,
+        ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
+        ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle, TabBarPositionConfig,
+        TabCapStyleConfig, ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
         UpdateChannelConfig, DEFAULT_RESIZE_STEP, MAX_RESIZE_STEP, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{

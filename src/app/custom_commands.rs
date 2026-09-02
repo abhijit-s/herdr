@@ -60,6 +60,7 @@ impl App {
                 command_id: entry.id.clone(),
                 binding_label: entry.binding.label.clone(),
                 binding_labels: entry.binding.bindings.labels(),
+                keybind_display: entry.binding.keybind_display.clone(),
                 action: entry.action,
                 description: entry.binding.description.clone(),
             })
@@ -613,6 +614,26 @@ mod tests {
                 .map(|binding| binding.command),
             Some("secret-command --token hidden".into())
         );
+    }
+
+    #[test]
+    fn manifest_reports_whether_the_author_set_an_explicit_label() {
+        // Clients need to tell a named command from one whose name *is* its
+        // chord. Both facts ride the manifest so no client has to infer it by
+        // comparing the display label against the chords.
+        let mut app = test_app();
+        install(&mut app, binding(crate::config::CustomCommandAction::Shell));
+        let unlabelled = app.client_shell_command_manifest();
+        assert_eq!(unlabelled[0].binding_label, "prefix+z");
+        assert_eq!(unlabelled[0].keybind_display, None);
+
+        let mut labelled = binding(crate::config::CustomCommandAction::Shell);
+        labelled.label = "Deploy web".into();
+        labelled.keybind_display = Some("prefix+z".into());
+        install(&mut app, labelled);
+        let manifest = app.client_shell_command_manifest();
+        assert_eq!(manifest[0].binding_label, "Deploy web");
+        assert_eq!(manifest[0].keybind_display.as_deref(), Some("prefix+z"));
     }
 
     #[test]

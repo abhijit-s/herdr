@@ -566,6 +566,7 @@ fn popup_command_blocks_underlying_input_until_surface_or_error() {
             command_id: "cmd_popup".into(),
             binding_label: binding.label.clone(),
             binding_labels: binding.bindings.labels(),
+            keybind_display: binding.keybind_display.clone(),
             action: crate::protocol::ClientShellCommandAction::Popup,
             description: None,
         });

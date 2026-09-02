@@ -1492,6 +1492,41 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::CommandPalette(_))) {
+            let row_hit = self
+                .hits
+                .command_palette_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .map(|(_, row)| *row);
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let Some(row) = row_hit {
+                        self.select_command_palette_row(row);
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.jump_command_palette_selection(-3);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.jump_command_palette_selection(3);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(row) = row_hit {
+                        self.select_command_palette_row(row);
+                        self.dispatch_command_palette_entry(outcome);
+                    } else if !super::contains(self.hits.command_palette_popup, point) {
+                        self.overlay = None;
+                        outcome.repaint = true;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::Help(_))) {
             match mouse.kind {
                 MouseEventKind::ScrollUp => {

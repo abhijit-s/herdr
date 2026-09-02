@@ -33,6 +33,11 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if action == crate::input::KeybindAction::OpenCommandPalette {
+                    self.open_command_palette(outcome);
+                    outcome.repaint = true;
+                    return;
+                }
                 if action == crate::input::KeybindAction::Help {
                     self.overlay = Some(ClientShellOverlay::Help(ClientHelpOverlay {
                         query: String::new(),
@@ -754,6 +759,12 @@ impl ClientShellState {
                     }
                 };
                 return (repaint, Vec::new());
+            }
+            PendingEndpointKind::CommandPaletteActionList => {
+                return (
+                    self.handle_command_palette_endpoint_result(result),
+                    Vec::new(),
+                );
             }
             kind @ (PendingEndpointKind::IntegrationList
             | PendingEndpointKind::IntegrationInstall) => {

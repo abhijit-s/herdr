@@ -244,6 +244,7 @@ command = "local-only"
             command_id: "cmd_loaded_endpoint".into(),
             binding_label: "prefix+c / prefix+y".into(),
             binding_labels: vec!["prefix+c".into(), "prefix+y".into()],
+            keybind_display: None,
             action: crate::protocol::ClientShellCommandAction::Shell,
             description: Some("loaded endpoint command".into()),
         });
@@ -285,6 +286,7 @@ command = "local-only"
             command_id: "cmd_reloaded_endpoint".into(),
             binding_label: "prefix+c / prefix+y".into(),
             binding_labels: vec!["prefix+c".into(), "prefix+y".into()],
+            keybind_display: None,
             action: crate::protocol::ClientShellCommandAction::Shell,
             description: Some("loaded endpoint command".into()),
         });
@@ -316,6 +318,7 @@ new_tab = "prefix+n"
             command_id: "cmd_remote".into(),
             binding_label: "prefix+z".into(),
             binding_labels: vec!["prefix+z".into()],
+            keybind_display: None,
             action: crate::protocol::ClientShellCommandAction::Shell,
             description: Some("remote command".into()),
         });
@@ -362,6 +365,7 @@ fn custom_binding_invokes_only_the_endpoint_manifest_id() {
             command_id: "cmd_0123456789abcdef0123456789abcdef".into(),
             binding_label: binding.label.clone(),
             binding_labels: binding.bindings.labels(),
+            keybind_display: binding.keybind_display.clone(),
             action: crate::protocol::ClientShellCommandAction::Shell,
             description: None,
         });
@@ -406,6 +410,7 @@ fn plugin_command_carries_client_owned_selection_coordinates() {
             command_id: "cmd_plugin".into(),
             binding_label: binding.label.clone(),
             binding_labels: binding.bindings.labels(),
+            keybind_display: binding.keybind_display.clone(),
             action: crate::protocol::ClientShellCommandAction::PluginAction,
             description: None,
         });
@@ -512,6 +517,7 @@ fn help_overlay_restores_released_search_scroll_and_custom_binding_behavior() {
             command_id: "plugin-action".into(),
             binding_label: "prefix+z".into(),
             binding_labels: vec!["prefix+z".into()],
+            keybind_display: None,
             action: crate::protocol::ClientShellCommandAction::PluginAction,
             description: Some("run plugin action".into()),
         });

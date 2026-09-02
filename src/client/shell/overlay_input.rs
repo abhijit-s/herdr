@@ -415,6 +415,13 @@ impl ClientShellState {
         if self.insert_worktree_overlay_text(text) {
             return true;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::CommandPalette(_))) {
+            let text = text
+                .chars()
+                .filter(|character| !character.is_control())
+                .collect::<String>();
+            return self.edit_command_palette_query(|query| query.push_str(&text));
+        }
         match self.overlay.as_mut() {
             Some(ClientShellOverlay::Rename(rename)) => {
                 if rename.replace_on_type {
@@ -562,6 +569,11 @@ impl ClientShellState {
                 }
                 _ => {}
             }
+            return;
+        }
+
+        if matches!(self.overlay, Some(ClientShellOverlay::CommandPalette(_))) {
+            self.route_command_palette_key(key, outcome);
             return;
         }
 
