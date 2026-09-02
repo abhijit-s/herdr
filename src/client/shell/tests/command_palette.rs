@@ -642,3 +642,97 @@ fn fuzzy_score_ranks_contiguous_prefixes_above_scattered_subsequences() {
         "prefix {prefix} <= scattered {scattered}"
     );
 }
+
+#[test]
+fn extreme_geometry_and_an_oversized_pasted_query_do_not_overflow() {
+    // Every width the header derives is u16. A terminal past 10922 columns
+    // overflows the 60%-of-screen popup sizing, and a pasted query wider than
+    // u16::MAX overflows the counter-fit check and the cursor position. Both
+    // are reachable, and both panic in a debug build.
+    let mut state = default_state();
+    open(&mut state);
+    // Each dimension overflows independently, so probe them one at a time
+    // rather than allocating a 20000x12000 cell buffer.
+    state.compose(20000, 12).expect("wide composed frame");
+    state.compose(60, 12000).expect("tall composed frame");
+
+    state.handle_raw_events(vec![RawInputEvent::Paste("a".repeat(70_000))]);
+    state
+        .compose(120, 32)
+        .expect("composed frame with a huge query");
+    // The palette survives it as an ordinary empty result set.
+    assert!(palette(&state).filtered.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::CommandPalette(_))
+    ));
+
+    // And it still degrades gracefully at the other extreme.
+    for cols in [1u16, 2, 8, 20, 41] {
+        for rows in [1u16, 2, 5, 11] {
+            state.compose(cols, rows);
+        }
+    }
+}
+
+#[test]
+fn unbinding_the_chord_disables_the_palette_entirely() {
+    // The configuration docs promise `command_palette = ""` turns the feature
+    // off. The chord is the only entrypoint — no menu item or mouse affordance
+    // opens it — so an empty binding has to leave it unreachable.
+    let mut config = Config::default();
+    config.keys.command_palette = crate::config::BindingConfig::One(String::new());
+    let mut state = state_with(&config);
+
+    assert!(state
+        .config
+        .keybinds
+        .keybinds
+        .command_palette
+        .label()
+        .is_none());
+    press_palette_chord(&mut state);
+    assert!(
+        state.overlay.is_none(),
+        "unbound chord still opened the palette"
+    );
+}
+
+#[test]
+fn overlapping_plugin_lists_converge_instead_of_accumulating() {
+    // Close and reopen fast enough and the first open's in-flight list lands on
+    // the second open's palette. Both requests ask for the same catalog, so the
+    // merge has to be idempotent: entries converge on the union rather than
+    // growing a duplicate set per delivery.
+    let mut state = default_state();
+    let first = open(&mut state);
+    state.handle_raw_events(vec![key(KeyCode::Esc)]);
+    let second = open(&mut state);
+
+    let request_id = |outcome: &ClientShellInput| {
+        let [ClientShellAction::Endpoint { request, .. }] = outcome.actions.as_slice() else {
+            panic!("expected one plugin.action.list request");
+        };
+        request.id.clone()
+    };
+    let actions = || {
+        Ok(crate::api::schema::ResponseResult::PluginActionList {
+            actions: vec![
+                plugin_action("acme", "build", "build"),
+                plugin_action("acme", "deploy", "deploy"),
+            ],
+        })
+    };
+
+    let baseline = palette(&state).entries.len();
+    state.handle_endpoint_result("boot-1", &request_id(&first), actions());
+    let after_first = palette(&state).entries.len();
+    assert_eq!(after_first, baseline + 2);
+
+    state.handle_endpoint_result("boot-1", &request_id(&second), actions());
+    assert_eq!(
+        palette(&state).entries.len(),
+        after_first,
+        "a second delivery of the same catalog grew the entry list"
+    );
+}

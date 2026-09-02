@@ -131,10 +131,13 @@ pub(super) fn render_command_palette_overlay(
     p: &Palette,
     rounded: bool,
 ) -> Option<OverlayRender> {
+    // Widened before scaling: `u16 * 6` overflows past 10922 columns or rows.
+    let six_tenths =
+        |available: u16| (u32::from(available) * 6 / 10).min(u32::from(u16::MAX)) as u16;
     let outer = popup(
         b.area,
-        (b.area.width * 6 / 10).max(40),
-        (b.area.height * 6 / 10).max(10),
+        six_tenths(b.area.width).max(40),
+        six_tenths(b.area.height).max(10),
     )?;
     let inner = panel(b, outer, p.accent, p.panel_bg, rounded)?;
     if inner.width < 12 || inner.height < 4 {
@@ -146,6 +149,9 @@ pub(super) fn render_command_palette_overlay(
         .remove_modifier(Modifier::DIM);
     let header = Rect::new(inner.x, inner.y, inner.width, 1);
     let query = format!(" > {}", palette.query);
+    // A pasted query can be far wider than any terminal, so every width derived
+    // from it saturates rather than wrapping.
+    let query_width = display_width(&query);
     put_text(b, header.x, header.y, header.width, &query, base.fg(p.text));
     let counter = if palette.loading_plugin_actions {
         Some("loading plugins…".to_owned())
@@ -155,7 +161,7 @@ pub(super) fn render_command_palette_overlay(
     if let Some(counter) = counter {
         // The query always wins the header: drop the counter rather than let it
         // collide with a long query.
-        if header.width > display_width(&query) + display_width(&counter) {
+        if header.width > query_width.saturating_add(display_width(&counter)) {
             put_right_text(b, header, header.y, &counter, base.fg(p.overlay0));
         }
     }
@@ -245,7 +251,10 @@ pub(super) fn render_command_palette_overlay(
         command_palette_rows: rows,
         command_palette_list_height: usize::from(body.height),
         cursor: Some(crate::protocol::CursorState {
-            x: (header.x + 3 + display_width(&palette.query)).min(header.right() - 1),
+            x: header
+                .x
+                .saturating_add(query_width)
+                .min(header.right().saturating_sub(1)),
             y: header.y,
             visible: true,
             shape: 0,
