@@ -10,6 +10,7 @@ pub mod plugins;
 pub mod response;
 pub mod server;
 pub mod session;
+pub mod status;
 pub mod tabs;
 pub mod workspaces;
 pub mod worktrees;
@@ -24,6 +25,7 @@ pub use plugins::*;
 pub use response::*;
 pub use server::*;
 pub use session::*;
+pub use status::*;
 pub use tabs::*;
 pub use workspaces::*;
 pub use worktrees::*;
@@ -65,6 +67,10 @@ pub enum Method {
     ReleaseNotesDismiss(ReleaseNotesDismissParams),
     #[serde(rename = "command.invoke")]
     CommandInvoke(CommandInvokeParams),
+    #[serde(rename = "status.set")]
+    StatusSet(StatusSetParams),
+    #[serde(rename = "status.clear")]
+    StatusClear(StatusClearParams),
     #[serde(rename = "client.window_title.set")]
     ClientWindowTitleSet(ClientWindowTitleSetParams),
     #[serde(rename = "client.window_title.clear")]

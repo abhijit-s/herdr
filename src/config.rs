@@ -37,10 +37,6 @@ pub use self::{
     theme::{parse_color, CustomThemeColors, ModeThemeColors, ThemeConfig, THEME_NAMES},
     window_title::{WindowTitlePart, WindowTitleTemplate, WindowTitleToken},
 };
-// StatusConfig and parse_color_opt are unused pending the status-strip
-// client-shell port (src/ui/status_right.rs); restore into the pub use
-// block above alongside that port instead of deleting the re-export.
-#[allow(unused_imports)]
 pub use self::{model::StatusConfig, theme::parse_color_opt};
 
 pub(crate) use self::keybinds::parse_key_combo;
@@ -85,9 +81,6 @@ pub const DEFAULT_STATUS_RIGHT_LENGTH: usize = 28;
 pub const DEFAULT_STATUS_INTERVAL_SECONDS: u64 = 5;
 /// Minimum floor for `[ui.status] status_interval`. Bounds `#(command)` spawn
 /// frequency so a misconfigured tiny interval cannot spawn a process storm.
-// Unread pending the status-strip client-shell port; consumed again by
-// StatusConfig::effective_interval_seconds once that lands.
-#[allow(dead_code)]
 pub const MIN_STATUS_INTERVAL_SECONDS: u64 = 1;
 pub const DEFAULT_HEADLESS_COLS: u16 = 120;
 pub const DEFAULT_HEADLESS_ROWS: u16 = 40;

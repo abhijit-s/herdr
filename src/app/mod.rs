@@ -20,6 +20,7 @@ mod popup;
 mod runtime;
 mod session;
 pub mod state;
+pub(crate) mod status_strip;
 mod tab_bar_status;
 mod terminal_targets;
 mod terminal_titles;
@@ -139,6 +140,10 @@ pub struct App {
     tab_bar_datetimes: Vec<tab_bar_status::TabBarDatetimeRuntime>,
     tab_bar_commands: Vec<tab_bar_status::TabBarCommandRuntime>,
     next_tab_bar_datetime_refresh: Option<Instant>,
+    /// Bumped on every `[ui.status]` reload so `#(command)` results spawned
+    /// under a superseded format string are discarded on arrival.
+    status_strip_generation: u64,
+    next_status_clock_refresh: Option<Instant>,
     /// Parsed `ui.window_title` plus the hostname resolved when it was applied.
     window_title_template: Option<(crate::config::WindowTitleTemplate, String)>,
     pub(crate) persist_pane_history: bool,
@@ -489,6 +494,10 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
+            // Both are replaced by `configure_status_strip` below, once the
+            // whole `App` exists to hold the generation counter with them.
+            status_strip: status_strip::StatusStripState::default(),
+            status_slots: status_strip::SlotStore::default(),
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
             cjk_ime_agent_filter_configured: !config.experimental.cjk_ime_agents.is_empty(),
             cjk_ime_agents: parse_cjk_ime_agents(&config.experimental.cjk_ime_agents),
@@ -598,6 +607,8 @@ impl App {
             tab_bar_datetimes: Vec::new(),
             tab_bar_commands: Vec::new(),
             next_tab_bar_datetime_refresh: None,
+            status_strip_generation: 0,
+            next_status_clock_refresh: None,
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
@@ -615,6 +626,7 @@ impl App {
             endpoint_commands,
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
+        app.configure_status_strip(&config.ui.status);
         app.configure_window_title(&config.ui.window_title);
         app
     }
@@ -829,6 +841,7 @@ impl App {
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
                 );
+                self.configure_status_strip(&config.ui.status);
                 self.configure_window_title(&config.ui.window_title);
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);

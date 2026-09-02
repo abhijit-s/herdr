@@ -10,6 +10,7 @@ mod panes;
 pub(crate) mod plugins;
 pub(super) mod responses;
 mod session;
+mod status;
 mod tabs;
 mod workspaces;
 mod worktrees;
@@ -39,6 +40,11 @@ impl App {
                 segment_index,
                 result,
             } => self.handle_tab_bar_command_finished(generation, segment_index, result),
+            AppEvent::StatusCommandFinished {
+                generation,
+                command,
+                result,
+            } => self.handle_status_command_finished(generation, command, result),
             ev @ AppEvent::TerminalBell { .. } => {
                 self.handle_internal_event(ev);
                 false
@@ -106,6 +112,16 @@ impl App {
         } = ev
         {
             let _ = self.handle_tab_bar_command_finished(generation, segment_index, result);
+            return Vec::new();
+        }
+
+        if let AppEvent::StatusCommandFinished {
+            generation,
+            command,
+            result,
+        } = ev
+        {
+            let _ = self.handle_status_command_finished(generation, command, result);
             return Vec::new();
         }
 
@@ -854,6 +870,12 @@ impl App {
             }
             Method::CommandInvoke(params) => {
                 return self.handle_command_invoke(request.id, params);
+            }
+            Method::StatusSet(params) => {
+                return self.handle_status_set(request.id, params);
+            }
+            Method::StatusClear(params) => {
+                return self.handle_status_clear(request.id, params);
             }
             Method::ClientWindowTitleSet(_) | Method::ClientWindowTitleClear(_) => {
                 return responses::encode_success(

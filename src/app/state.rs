@@ -839,6 +839,12 @@ pub struct AppState {
     pub show_agent_labels_on_pane_borders: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
+    /// Parsed `[ui.status]` strip plus its resolved `#(command)`/clock caches.
+    /// Rebuilt from config on reload, so pushed slot values live separately in
+    /// `status_slots` to survive that rebuild.
+    pub(crate) status_strip: crate::app::status_strip::StatusStripState,
+    /// Values pushed into `#{slot:NAME}` tokens over the API socket.
+    pub(crate) status_slots: crate::app::status_strip::SlotStore,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
     /// the pane requested `?25l`. See `[experimental] reveal_hidden_cursor_for_cjk_ime`.
     pub reveal_hidden_cursor_for_cjk_ime: bool,
@@ -1106,6 +1112,8 @@ impl AppState {
             show_agent_labels_on_pane_borders: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
+            status_strip: crate::app::status_strip::StatusStripState::default(),
+            status_slots: crate::app::status_strip::SlotStore::default(),
             reveal_hidden_cursor_for_cjk_ime: false,
             cjk_ime_agent_filter_configured: false,
             cjk_ime_agents: Vec::new(),

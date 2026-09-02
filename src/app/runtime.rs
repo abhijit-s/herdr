@@ -132,11 +132,17 @@ impl App {
         std::thread::spawn(move || crate::detect::manifest_update::auto_update(manifest_update_tx));
     }
 
+    /// Earliest instant the endpoint loop must wake up.
+    ///
+    /// `has_app_client` gates the lanes that exist only to keep an attached
+    /// client's chrome fresh: a detached session neither refreshes git status
+    /// nor keeps spawning `[ui.status]` `#(command)` processes with nobody
+    /// watching.
     pub(crate) fn next_headless_loop_deadline_with_git_refresh(
         &self,
         now: Instant,
         needs_render: bool,
-        include_git_refresh: bool,
+        has_app_client: bool,
     ) -> Option<Instant> {
         let render_deadline = if needs_render {
             self.last_render_at
@@ -151,7 +157,7 @@ impl App {
             self.toast_deadline,
             self.state.next_pending_agent_notification_deadline(),
             self.state.next_managed_agent_deadline(),
-            include_git_refresh
+            has_app_client
                 .then(|| self.git_refresh_deadline())
                 .flatten(),
             self.next_auto_update_check,
@@ -160,6 +166,7 @@ impl App {
             self.pending_agent_resume_deadline,
             self.session_save_deadline,
             self.next_tab_bar_status_deadline(),
+            self.next_status_strip_deadline(has_app_client),
             render_deadline,
         ]
         .into_iter()

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Current protocol version. Bumped when wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Maximum allowed frame payload size (2 MB). Frames larger than this are
 /// rejected to prevent denial-of-service via oversized length prefixes.
@@ -890,6 +890,11 @@ pub struct ClientShellSnapshot {
     pub focused_pane_id: Option<String>,
     pub tab_bar_right: Vec<ClientShellTabStatusSegment>,
     pub tab_bar_right_separator: String,
+    /// Resolved `[ui.status]` strip segments; empty when the strip is disabled.
+    pub status_strip: Vec<ClientShellStatusSegment>,
+    /// `status_right_length`: the column budget the client fits the strip into,
+    /// clamped against that client's own available width. Zero when disabled.
+    pub status_strip_budget: u16,
     pub agent_view_label: Option<String>,
     pub agent_order: Vec<String>,
     pub workspaces: Vec<ClientShellWorkspace>,
@@ -958,6 +963,29 @@ pub struct ClientShellCommand {
 pub struct ClientShellTabStatusSegment {
     pub text: String,
     pub accent: bool,
+}
+
+/// One resolved piece of the `[ui.status]` right strip, in draw order.
+///
+/// The endpoint owns the strip's content because `status_right` mixes runtime
+/// (`#(command)`) with presentation (`#[fg=…]`) in one string and the command
+/// has to run where the session lives. Colors stay unresolved here on purpose:
+/// `fg`/`bg` carry the directive's raw value so each client resolves it against
+/// its own palette, and width fitting stays client-side because the budget
+/// depends on that client's terminal width.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientShellStatusSegment {
+    pub text: String,
+    /// Literal separator text, droppable when truncation removes a neighbour.
+    /// `false` marks resolved content (a command, clock, or pushed slot).
+    pub separator: bool,
+    /// Raw `#[fg=…]` value: a hex/rgb/ANSI color name, or a herdr theme token.
+    pub fg: Option<String>,
+    /// Raw `#[bg=…]` value; mirrors `fg`.
+    pub bg: Option<String>,
+    /// `ratatui::style::Modifier` bits. Sent as raw bits because ratatui is
+    /// built without its `serde` feature.
+    pub modifiers: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2280,6 +2308,30 @@ mod tests {
                 accent: false,
             }],
             tab_bar_right_separator: " · ".into(),
+            status_strip: vec![
+                ClientShellStatusSegment {
+                    text: "main".into(),
+                    separator: false,
+                    fg: Some("accent".into()),
+                    bg: None,
+                    modifiers: ratatui::style::Modifier::BOLD.bits(),
+                },
+                ClientShellStatusSegment {
+                    text: " │ ".into(),
+                    separator: true,
+                    fg: None,
+                    bg: None,
+                    modifiers: 0,
+                },
+                ClientShellStatusSegment {
+                    text: "09:04".into(),
+                    separator: false,
+                    fg: Some("#cba6f7".into()),
+                    bg: Some("surface0".into()),
+                    modifiers: 0,
+                },
+            ],
+            status_strip_budget: 28,
             agent_view_label: None,
             agent_order: Vec::new(),
             workspaces: vec![ClientShellWorkspace {

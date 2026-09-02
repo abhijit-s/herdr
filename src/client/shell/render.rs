@@ -4,6 +4,8 @@ use super::*;
 mod overlays;
 #[path = "../shell/sidebar.rs"]
 mod sidebar;
+#[path = "../shell/status_strip.rs"]
+mod status_strip;
 #[path = "../shell/tabs.rs"]
 mod tabs;
 
@@ -12,7 +14,7 @@ pub(super) use overlays::{
     client_navigator_rows, render_client_overlay, render_context_menu, render_global_menu,
 };
 pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
-pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
+pub(super) use tabs::{render_tab_bar, tab_bar_right_edge_width};
 pub(super) fn render_mode_bar(
     buffer: &mut Buffer,
     pane_area: Rect,

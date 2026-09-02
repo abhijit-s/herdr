@@ -1201,6 +1201,10 @@ impl ClientShellState {
                 self.mode = ClientShellMode::Terminal;
             }
         }
+        // The strip's fitted width depends on the bar width, so measure both
+        // snapshots against the same bar. Before the first layout pass nothing
+        // constrains it, so an unclamped budget is the right assumption.
+        let tab_bar_width = self.last_tab_bar_width.unwrap_or(u16::MAX);
         let tab_layout_changed = self.snapshot.as_deref().is_none_or(|current| {
             current.tabs.len() != snapshot.tabs.len()
                 || current
@@ -1213,7 +1217,8 @@ impl ClientShellState {
                             || left.label != right.label
                             || left.zoomed != right.zoomed
                     })
-                || render::tab_bar_status_width(current) != render::tab_bar_status_width(&snapshot)
+                || render::tab_bar_right_edge_width(current, tab_bar_width)
+                    != render::tab_bar_right_edge_width(&snapshot, tab_bar_width)
         });
         if tab_layout_changed
             || self

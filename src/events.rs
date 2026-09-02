@@ -154,6 +154,17 @@ pub enum AppEvent {
         segment_index: usize,
         result: Result<Option<String>, String>,
     },
+    /// A `#(command)` segment of the `[ui.status]` right strip finished.
+    ///
+    /// Keyed by the command text rather than a position, because one command
+    /// may appear at several places in `status_right` and they all share a
+    /// single cache entry. `generation` discards results that arrive after a
+    /// config reload rebuilt the strip.
+    StatusCommandFinished {
+        generation: u64,
+        command: String,
+        result: Result<Option<String>, String>,
+    },
     /// A plugin action or event command finished.
     PluginCommandFinished {
         log_id: String,

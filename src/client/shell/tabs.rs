@@ -228,9 +228,23 @@ pub(crate) fn render_tab_bar(
         }
     }
     render_tab_bar_status(buffer, area, snapshot, palette);
+    if let Some(strip) = status_strip_area(snapshot, area) {
+        status_strip::render_status_strip(buffer, strip, snapshot, palette);
+    }
 }
 
-pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {
+/// Columns the tab bar's right edge is currently giving up, whichever
+/// decoration owns it. Drives the client's "does this snapshot change the
+/// chrome layout?" repaint check.
+pub(crate) fn tab_bar_right_edge_width(snapshot: &ClientShellSnapshot, area_width: u16) -> u16 {
+    if status_strip::is_enabled(snapshot) {
+        status_strip::status_strip_width(snapshot, area_width)
+    } else {
+        tab_bar_status_width(snapshot)
+    }
+}
+
+fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {
     let content = snapshot.tab_bar_right.iter().fold(0u16, |width, segment| {
         width.saturating_add(display_width(&segment.text))
     });
@@ -242,7 +256,26 @@ pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {
 }
 
 fn tab_bar_status_area(snapshot: &ClientShellSnapshot, area: Rect) -> Option<Rect> {
-    let width = tab_bar_status_width(snapshot);
+    // The `[ui.status]` strip and the `tab_bar_right` entries both decorate the
+    // tab bar's right edge. When the strip is configured it wins that edge, so
+    // reserve and draw nothing here rather than stacking two decorations; the
+    // strip takes the same zone instead. This is the single reservation gate
+    // for `tab_bar_right`, feeding both `tab_bar_content_area` and the draw.
+    if status_strip::is_enabled(snapshot) {
+        return None;
+    }
+    right_edge_area(area, tab_bar_status_width(snapshot))
+}
+
+fn status_strip_area(snapshot: &ClientShellSnapshot, area: Rect) -> Option<Rect> {
+    right_edge_area(area, status_strip::status_strip_width(snapshot, area.width))
+}
+
+/// Reserve `width` columns at the tab bar's right edge, plus one column of gap
+/// before the interactive tab strip. Tabs win on narrow rows: below
+/// `MIN_TAB_STRIP_WIDTH` of remaining space the decoration is dropped entirely
+/// rather than squeezing the tabs out.
+fn right_edge_area(area: Rect, width: u16) -> Option<Rect> {
     if width == 0 {
         return None;
     }
@@ -252,7 +285,10 @@ fn tab_bar_status_area(snapshot: &ClientShellSnapshot, area: Rect) -> Option<Rec
 }
 
 fn tab_bar_content_area(snapshot: &ClientShellSnapshot, area: Rect) -> Rect {
+    // Exactly one of the two right-edge decorations claims the zone, so the
+    // fallback here never double-reserves.
     let reserved = tab_bar_status_area(snapshot, area)
+        .or_else(|| status_strip_area(snapshot, area))
         .map(|status| status.width.saturating_add(1))
         .unwrap_or(0);
     Rect {

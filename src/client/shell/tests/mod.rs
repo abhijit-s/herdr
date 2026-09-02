@@ -24,6 +24,8 @@ fn snapshot() -> ClientShellSnapshot {
         focused_pane_id: Some("pane_1".into()),
         tab_bar_right: Vec::new(),
         tab_bar_right_separator: " ".into(),
+        status_strip: Vec::new(),
+        status_strip_budget: 0,
         agent_view_label: None,
         agent_order: Vec::new(),
         workspaces: vec![ClientShellWorkspace {
@@ -218,3 +220,4 @@ mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
 mod startup_overlays;
+mod status_strip;

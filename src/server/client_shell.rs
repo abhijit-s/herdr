@@ -152,6 +152,23 @@ pub(super) fn snapshot(
         })
         .collect();
 
+    // The strip's text is endpoint-owned (its `#(command)`s run here), but its
+    // colors stay raw and its width stays unfitted: each client resolves theme
+    // tokens against its own palette and truncates to its own terminal width.
+    let status_strip = app
+        .state
+        .status_strip
+        .resolved_segments(&app.state.status_slots)
+        .into_iter()
+        .map(|segment| protocol::ClientShellStatusSegment {
+            text: segment.text,
+            separator: segment.kind == crate::app::status_strip::SegmentKind::Literal,
+            fg: segment.style.fg,
+            bg: segment.style.bg,
+            modifiers: segment.style.add_modifier.bits(),
+        })
+        .collect();
+
     let product_announcement = app.state.product_announcement.as_ref().map(|announcement| {
         protocol::ClientShellProductAnnouncement {
             version: announcement.version.clone(),
@@ -188,6 +205,8 @@ pub(super) fn snapshot(
         focused_pane_id: snapshot.focused_pane_id,
         tab_bar_right,
         tab_bar_right_separator: app.state.tab_bar_right_separator.clone(),
+        status_strip,
+        status_strip_budget: app.state.status_strip.budget(),
         agent_view_label,
         agent_order,
         workspaces,
