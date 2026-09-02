@@ -156,14 +156,18 @@ impl App {
                 continue;
             }
             runtime.next_run_at = now.checked_add(runtime.interval).unwrap_or(now);
-            runtime.task = Some(spawn_status_command(
+            let segment_index = runtime.segment_index;
+            runtime.task = Some(spawn_command_task(
                 self.event_tx.clone(),
-                generation,
-                runtime.segment_index,
                 runtime.command.clone(),
                 runtime.timeout,
                 environment.clone(),
                 cwd.clone(),
+                move |result| crate::events::AppEvent::TabBarCommandFinished {
+                    generation,
+                    segment_index,
+                    result,
+                },
             ));
         }
 
@@ -238,7 +242,7 @@ fn sanitize_literal_text(value: &str) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-fn sanitize_status_text(value: &str) -> Option<String> {
+pub(super) fn sanitize_status_text(value: &str) -> Option<String> {
     let value: String = value
         .trim()
         .chars()
@@ -379,7 +383,7 @@ async fn read_last_output_line(
     })
 }
 
-struct StatusCommandTask {
+pub(super) struct StatusCommandTask {
     abort_handle: tokio::task::AbortHandle,
     control: Arc<StatusCommandControl>,
 }
@@ -419,14 +423,20 @@ impl StatusCommandControl {
     }
 }
 
-fn spawn_status_command(
+/// Run one status command off the event loop and deliver its captured output
+/// back through the app event channel as whatever event `finished` builds.
+///
+/// Shared by the `tab_bar_right` command entries and the `[ui.status]` strip
+/// (`super::status_strip`): both need the same sandbox — detached process
+/// group, piped stdout, no stdin, hard deadline — and differ only in which
+/// event carries the result.
+pub(super) fn spawn_command_task(
     event_tx: tokio::sync::mpsc::Sender<crate::events::AppEvent>,
-    generation: u64,
-    segment_index: usize,
     command: String,
     timeout: Duration,
     environment: Vec<(String, String)>,
     cwd: Option<std::path::PathBuf>,
+    finished: impl FnOnce(Result<Option<String>, String>) -> crate::events::AppEvent + Send + 'static,
 ) -> StatusCommandTask {
     let control = Arc::new(StatusCommandControl {
         terminated: AtomicBool::new(false),
@@ -445,13 +455,7 @@ fn spawn_status_command(
         )
         .await;
         task_control.terminate();
-        let _ = event_tx
-            .send(crate::events::AppEvent::TabBarCommandFinished {
-                generation,
-                segment_index,
-                result,
-            })
-            .await;
+        let _ = event_tx.send(finished(result)).await;
     });
     StatusCommandTask {
         abort_handle: task.abort_handle(),
@@ -519,6 +523,31 @@ async fn run_status_command(
 mod tests {
     use super::*;
     use crate::{config::Config, events::AppEvent};
+
+    /// The tab-bar-shaped spawn these tests were written against, now that the
+    /// runner is shared with the `[ui.status]` strip and takes an event builder.
+    fn spawn_status_command(
+        event_tx: tokio::sync::mpsc::Sender<crate::events::AppEvent>,
+        generation: u64,
+        segment_index: usize,
+        command: String,
+        timeout: Duration,
+        environment: Vec<(String, String)>,
+        cwd: Option<std::path::PathBuf>,
+    ) -> StatusCommandTask {
+        spawn_command_task(
+            event_tx,
+            command,
+            timeout,
+            environment,
+            cwd,
+            move |result| AppEvent::TabBarCommandFinished {
+                generation,
+                segment_index,
+                result,
+            },
+        )
+    }
 
     fn test_app() -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
