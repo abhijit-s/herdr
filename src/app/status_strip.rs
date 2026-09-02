@@ -29,6 +29,11 @@ use crate::config::StatusConfig;
 /// [`App::handle_status_strip_tasks`]).
 const STATUS_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Distinct `#{slot:NAME}` sources the push lane keeps at once. Mirrors
+/// `MAX_METADATA_TOKEN_KEYS_PER_RESOURCE`: the lane is host-scoped and writers
+/// pick their own key, so it needs a ceiling to stay bounded.
+const MAX_STATUS_SLOT_SOURCES: usize = 32;
+
 /// A tmux-style `#[…]` style directive: the fg/bg/modifiers it sets for the
 /// segments that follow it, plus a `reset` flag for `#[default]`/`#[none]`.
 /// Contributes zero display width. Colors come only from the trusted format
@@ -362,27 +367,22 @@ fn format_clock(fmt: &str, t: &ClockTime) -> String {
 /// separator literal, so an empty `#(command)`/clock/slot leaves no dangling
 /// ` │ `. Prefers dropping the following separator; falls back to the preceding
 /// one for a trailing empty segment.
+/// Consumes `segs` and moves survivors across rather than cloning them: this
+/// runs once per client-shell snapshot, so copying every segment's text would
+/// ride the frame-fanout path for no reason.
 fn drop_empty_segments(segs: Vec<ResolvedSegment>) -> Vec<ResolvedSegment> {
     let mut out: Vec<ResolvedSegment> = Vec::with_capacity(segs.len());
-    let mut i = 0;
-    while i < segs.len() {
-        let seg = &segs[i];
+    let mut segs = segs.into_iter().peekable();
+    while let Some(seg) = segs.next() {
         if seg.kind == SegmentKind::Content && seg.text.is_empty() {
-            if segs
-                .get(i + 1)
-                .is_some_and(|s| s.kind == SegmentKind::Literal)
-            {
-                i += 2; // Drop the empty segment and its following separator.
-            } else {
-                if out.last().is_some_and(|s| s.kind == SegmentKind::Literal) {
-                    out.pop(); // Trailing empty: drop the preceding separator.
-                }
-                i += 1;
+            if segs.peek().is_some_and(|s| s.kind == SegmentKind::Literal) {
+                segs.next(); // Drop the empty segment's following separator.
+            } else if out.last().is_some_and(|s| s.kind == SegmentKind::Literal) {
+                out.pop(); // Trailing empty: drop the preceding separator.
             }
             continue;
         }
-        out.push(seg.clone());
-        i += 1;
+        out.push(seg);
     }
     out
 }
@@ -430,6 +430,30 @@ pub(crate) struct SlotStore {
 }
 
 impl SlotStore {
+    /// Drop values whose TTL has elapsed, along with their seq watermarks.
+    ///
+    /// TTL expiry is lazy at read time, which hides a stale value but keeps its
+    /// entry resident forever. Reclaiming here keeps a writer that pushes with
+    /// a TTL from growing the store without bound. Dropping the watermark with
+    /// the value matches [`Self::clear`]: once nothing is displayed for a
+    /// source, a fresh writer starts clean.
+    fn purge_expired(&mut self, now: Instant) {
+        self.slots.retain(|_, slot| !slot.is_expired(now));
+        let slots = &self.slots;
+        self.seqs.retain(|source, _| slots.contains_key(source));
+    }
+
+    /// Whether accepting `source` would push the store past its ceiling.
+    ///
+    /// Callers choose their own `source`, so a writer keying by timestamp, run
+    /// id, or pane would otherwise grow the store for the life of the endpoint.
+    /// Expired entries are reclaimed first, so a store full of dead TTLs still
+    /// admits a new writer.
+    pub(crate) fn at_capacity_for(&mut self, source: &str, now: Instant) -> bool {
+        self.purge_expired(now);
+        !self.slots.contains_key(source) && self.slots.len() >= MAX_STATUS_SLOT_SOURCES
+    }
+
     /// Accept a report only when its `seq` advances the last seen one for the
     /// source. A `None` seq is always accepted (unsequenced writers).
     fn accept_seq(&mut self, source: &str, seq: Option<u64>) -> bool {
@@ -515,9 +539,16 @@ impl StatusStripState {
     pub(crate) fn from_config(cfg: &StatusConfig) -> Self {
         let segments = parse_status_right(&cfg.status_right);
         let mut commands = HashMap::new();
-        for seg in &segments {
-            if let Segment::Command(cmd) = seg {
-                commands.entry(cmd.clone()).or_default();
+        // Registering no commands on a platform that cannot run them is the
+        // same gate `configure_tab_bar_status` applies, and matters more here:
+        // an unregistered command resolves to empty text and drops out of the
+        // strip, whereas a registered one would fail to spawn every interval
+        // forever. Literals, the clock, and pushed slots keep working.
+        if crate::platform::status_commands_supported() {
+            for seg in &segments {
+                if let Segment::Command(cmd) = seg {
+                    commands.entry(cmd.clone()).or_default();
+                }
             }
         }
         Self {
@@ -532,6 +563,20 @@ impl StatusStripState {
 
     pub(crate) fn is_enabled(&self) -> bool {
         !self.raw.trim().is_empty() && self.budget > 0
+    }
+
+    /// Whether the current format string actually renders `source`.
+    ///
+    /// The push lane accepts any source, but only a referenced one can change
+    /// what is on screen. Repainting for an unreferenced push would rebuild the
+    /// snapshot and re-render for every attached client on a lane a caller can
+    /// drive at will.
+    pub(crate) fn references_slot(&self, source: &str) -> bool {
+        self.is_enabled()
+            && self
+                .segments
+                .iter()
+                .any(|segment| matches!(segment, Segment::Slot(name) if name == source))
     }
 
     /// Column budget the client should fit the strip into, clamped to `u16` for
@@ -773,10 +818,15 @@ impl App {
         for command in due {
             self.state.status_strip.mark_command_started(&command, now);
             let finished_command = command.clone();
-            // The task handle is deliberately dropped rather than retained. The
-            // strip's timeout is a fixed 2s, so a command outlives a config
-            // reload only briefly, and the generation guard in
-            // `handle_status_command_finished` already discards its result.
+            // The task handle is deliberately dropped rather than retained.
+            // `TabBarCommandRuntime` keeps its handle so a reload can abort the
+            // task and kill the process group immediately (see its `Drop` and
+            // `reload_aborts_an_in_flight_command_task_and_its_descendants`);
+            // the strip settles for a weaker guarantee because its timeout is a
+            // fixed 2s rather than configurable, so a reloaded-away command and
+            // its descendants outlive the reload by at most that, and the
+            // generation guard in `handle_status_command_finished` already
+            // discards the result either way.
             drop(super::tab_bar_status::spawn_command_task(
                 self.event_tx.clone(),
                 command,
@@ -1208,6 +1258,48 @@ mod tests {
         // A fresh writer after clear starts clean even with a low seq.
         assert!(store.set("git".into(), "dev".into(), Some(1), None, now));
         assert_eq!(store.get("git", now), Some("dev"));
+    }
+
+    #[test]
+    fn slot_store_caps_live_sources_but_reclaims_expired_ones() {
+        let mut store = SlotStore::default();
+        let now = Instant::now();
+        for index in 0..MAX_STATUS_SLOT_SOURCES {
+            let source = format!("s{index}");
+            assert!(!store.at_capacity_for(&source, now), "source {index}");
+            store.set(source, "x".into(), None, None, now);
+        }
+        // A new source beyond the cap is refused; an existing one still writes.
+        assert!(store.at_capacity_for("overflow", now));
+        assert!(!store.at_capacity_for("s0", now));
+
+        // Expired entries are reclaimed before the cap is applied, so a store
+        // full of lapsed TTLs still admits a new writer.
+        let mut store = SlotStore::default();
+        for index in 0..MAX_STATUS_SLOT_SOURCES {
+            store.set(
+                format!("s{index}"),
+                "x".into(),
+                None,
+                Some(Duration::from_millis(10)),
+                now,
+            );
+        }
+        assert!(store.at_capacity_for("overflow", now));
+        let later = now + Duration::from_millis(50);
+        assert!(!store.at_capacity_for("overflow", later));
+        // The reclaimed sources took their seq watermarks with them, so a fresh
+        // writer on a recycled key starts clean.
+        assert!(store.set("s0".into(), "new".into(), Some(1), None, later));
+    }
+
+    #[test]
+    fn references_slot_only_matches_tokens_the_format_string_renders() {
+        let configured = build("#{slot:git} │ %H:%M");
+        assert!(configured.references_slot("git"));
+        assert!(!configured.references_slot("app"));
+        // A disabled strip renders nothing, so it references nothing.
+        assert!(!strip("#{slot:git}", 0, 5).references_slot("git"));
     }
 
     #[test]

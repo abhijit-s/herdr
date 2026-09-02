@@ -16,9 +16,7 @@ use super::*;
 use ratatui::style::Color;
 
 use crate::protocol::ClientShellStatusSegment;
-
-/// Ellipsis appended when a lone oversize segment is truncated.
-const ELLIPSIS: char = '…';
+use crate::ui::text::truncate_end;
 
 /// Resolve a herdr theme-token name to its color in the active [`Palette`].
 ///
@@ -85,32 +83,6 @@ fn segments_width(segments: &[ClientShellStatusSegment]) -> u16 {
     })
 }
 
-/// Truncate `text` to at most `budget` display columns, appending an ellipsis
-/// when characters are dropped. Measures display columns, never bytes or chars,
-/// so a wide glyph costs what it actually costs on screen.
-fn truncate_to_columns(text: &str, budget: u16) -> String {
-    if display_width(text) <= budget {
-        return text.to_string();
-    }
-    if budget == 0 {
-        return String::new();
-    }
-    // Reserve one column for the ellipsis marker.
-    let content_budget = usize::from(budget.saturating_sub(1));
-    let mut out = String::new();
-    let mut used = 0usize;
-    for c in text.chars() {
-        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if used + w > content_budget {
-            break;
-        }
-        out.push(c);
-        used += w;
-    }
-    out.push(ELLIPSIS);
-    out
-}
-
 /// The part of the strip that fits into a budget.
 ///
 /// Segments are dropped leftmost-first (along with a now-leading separator), so
@@ -165,10 +137,13 @@ pub(super) fn fit_strip(segments: &[ClientShellStatusSegment], budget: u16) -> F
         };
     }
 
+    // The loop above only exits here with a single segment left, so the
+    // truncation below always applies to the one element `texts` indexes at 0.
+    debug_assert_eq!(remaining.len(), 1);
     // Lone oversize segment: the sole allowed mid-character truncation.
     let truncated = remaining
         .first()
-        .map(|segment| truncate_to_columns(&segment.text, budget));
+        .map(|segment| truncate_end(&segment.text, usize::from(budget)));
     let width = truncated.as_deref().map(display_width).unwrap_or(0);
     FittedStrip {
         segments: remaining,
@@ -177,11 +152,18 @@ pub(super) fn fit_strip(segments: &[ClientShellStatusSegment], budget: u16) -> F
     }
 }
 
-/// Whether the endpoint has a strip configured at all. Width-independent, so it
-/// is a stable answer to "which decoration owns the tab bar's right edge?" even
-/// on a terminal too narrow to actually show the strip.
+/// Whether the endpoint has a strip configured at all.
+///
+/// The budget is the authority, not the segment list: the endpoint drops
+/// segments that currently resolve empty, so a configured strip whose only
+/// `#(command)` has not run yet — or just returned nothing — projects an empty
+/// segment list. Reading emptiness as "no strip" would hand the tab bar's right
+/// edge back to the `tab_bar_right` entries and take it away again on the next
+/// tick, flapping both decorations and the tab scroll along with them.
+/// `StatusStripState::budget()` reports zero if and only if the strip is
+/// disabled, which is exactly the stable bit this needs.
 pub(super) fn is_enabled(snapshot: &ClientShellSnapshot) -> bool {
-    !snapshot.status_strip.is_empty() && snapshot.status_strip_budget > 0
+    snapshot.status_strip_budget > 0
 }
 
 /// Columns the strip wants on the tab bar, capped by both the endpoint's
@@ -298,7 +280,7 @@ mod tests {
         let segs = [content("2026-07-09")];
         let fitted = fit_strip(&segs, 5);
         let out = joined(&fitted);
-        assert!(out.ends_with(ELLIPSIS), "out: {out:?}");
+        assert!(out.ends_with('…'), "out: {out:?}");
         assert!(display_width(&out) <= 5, "out: {out:?}");
         assert_eq!(fitted.width(), display_width(&out));
     }
@@ -310,7 +292,7 @@ mod tests {
         assert_eq!(display_width("提交反馈"), 8);
         let out = joined(&fit_strip(&segs, 5));
         assert!(display_width(&out) <= 5, "out: {out:?}");
-        assert!(out.ends_with(ELLIPSIS));
+        assert!(out.ends_with('…'));
     }
 
     #[test]

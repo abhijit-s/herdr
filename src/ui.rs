@@ -7,7 +7,7 @@ mod scrollbar;
 mod sidebar;
 mod status;
 mod tab_surface;
-mod text;
+pub(crate) mod text;
 mod widgets;
 
 pub(crate) use self::onboarding::{

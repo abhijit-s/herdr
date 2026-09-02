@@ -98,6 +98,7 @@ Raw socket method names use dot notation:
 | --- | --- |
 | Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
 | Notification | `notification.show` |
+| Status | `status.set`, `status.clear` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
@@ -376,6 +377,24 @@ The response reports whether anything was shown:
 ```
 
 Possible reasons are `shown`, `disabled`, `rate_limited`, `no_foreground_client`, and `busy`. `disabled` means `ui.toast.delivery = "off"`. `busy` means an existing in-app toast was not replaced. Terminal and system delivery are best-effort through the current foreground attached Herdr client.
+
+The CLI wrappers for `status.set` and `status.clear` are:
+
+```bash
+herdr status set --source git --text main --seq 7 --ttl-ms 5000
+herdr status clear --source git
+```
+
+Push a value into the status strip's `#{slot:NAME}` push lane, where it renders wherever a matching token appears in `[ui.status] status_right`:
+
+```json
+{"id":"req_status","method":"status.set","params":{"source":"git","text":"main","seq":7,"ttl_ms":5000}}
+{"id":"req_clear","method":"status.clear","params":{"source":"git"}}
+```
+
+`source` is required and may contain only ASCII letters, digits, colon, dot, underscore, and hyphen, up to 80 characters; anything else returns `invalid_status_source`. `text` is required and is sanitized to plain text on ingest, so a pushed value cannot inject styling. `seq` is optional and gives last-writer-wins ordering: a report whose `seq` does not advance the last accepted one for that source is ignored. `ttl_ms` is optional, must be between 1 and 86400000, and expires the value after that long; anything else returns `invalid_status_ttl`. Values are host-scoped, keyed by `source` alone, and survive a config reload.
+
+The lane holds at most 32 live sources at once. Expired values are reclaimed before the limit is applied, so a store full of lapsed TTLs still accepts a new writer; a genuinely new source beyond the limit returns `status_slot_limit`. Both methods return `{"type":"ok"}`.
 
 Set or clear the foreground client's outer terminal window title:
 

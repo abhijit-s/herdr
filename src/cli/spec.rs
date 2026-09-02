@@ -141,6 +141,19 @@ fn status_command() -> Command {
                 .about("Show local client status")
                 .arg(json_flag()),
         )
+        .subcommand(
+            Command::new("set")
+                .about("Push a value into a status strip #{slot:NAME} token")
+                .arg(option("source", "NAME").help("Slot name to write"))
+                .arg(option("text", "TEXT").help("Value to render"))
+                .arg(option("seq", "N").help("Last-writer-wins sequence number"))
+                .arg(option("ttl-ms", "N").help("Expire the value after N milliseconds")),
+        )
+        .subcommand(
+            Command::new("clear")
+                .about("Clear a pushed status strip #{slot:NAME} value")
+                .arg(option("source", "NAME").help("Slot name to clear")),
+        )
 }
 
 fn config_command() -> Command {

@@ -100,6 +100,25 @@ fn strip_wins_the_right_edge_over_endpoint_tab_bar_entries() {
 }
 
 #[test]
+fn a_configured_strip_keeps_the_edge_while_its_segments_resolve_empty() {
+    // The endpoint drops segments that resolve empty, so a strip whose only
+    // `#(command)` has not run yet projects no segments at all. Ownership of
+    // the right edge must follow the configured budget rather than that list,
+    // or both decorations flap every time the command output goes blank.
+    let mut projected = snapshot();
+    projected.tab_bar_right = endpoint_status_entries();
+    projected.tab_bar_right_separator = " · ".into();
+    projected.status_strip = Vec::new();
+    projected.status_strip_budget = 28;
+
+    let row = tab_bar_row(projected, 106);
+    assert!(
+        !row.contains("host"),
+        "tab_bar_right reclaimed the edge from a blank strip: {row:?}"
+    );
+}
+
+#[test]
 fn endpoint_tab_bar_entries_keep_the_edge_when_no_strip_is_configured() {
     let mut projected = snapshot();
     projected.tab_bar_right = endpoint_status_entries();

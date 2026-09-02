@@ -27,11 +27,19 @@ impl App {
         // separator rather than leaving the previous value stuck.
         let text =
             crate::app::tab_bar_status::sanitize_status_text(&params.text).unwrap_or_default();
-        if self
+        let now = Instant::now();
+        if self.state.status_slots.at_capacity_for(&source, now) {
+            return encode_error(
+                id,
+                "status_slot_limit",
+                "the status strip holds at most 32 pushed sources",
+            );
+        }
+        let changed = self
             .state
             .status_slots
-            .set(source, text, params.seq, ttl, Instant::now())
-        {
+            .set(source.clone(), text, params.seq, ttl, now);
+        if changed && self.state.status_strip.references_slot(&source) {
             self.request_status_strip_repaint();
         }
 
@@ -43,14 +51,17 @@ impl App {
             Ok(source) => source,
             Err(message) => return encode_error(id, "invalid_status_source", message),
         };
-        if self.state.status_slots.clear(&source, Instant::now()) {
+        if self.state.status_slots.clear(&source, Instant::now())
+            && self.state.status_strip.references_slot(&source)
+        {
             self.request_status_strip_repaint();
         }
 
         encode_success(id, ResponseResult::Ok {})
     }
 
-    /// Reuse the state-change to repaint path: a pushed value changed the
+    /// Reuse the state-change to repaint path: a rendered pushed value changed
+    /// the
     /// strip, so flag a redraw. No new polling is introduced.
     fn request_status_strip_repaint(&self) {
         self.render_dirty.request_generic();
