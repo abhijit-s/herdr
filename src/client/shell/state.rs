@@ -668,7 +668,12 @@ pub(super) enum PendingEndpointKind {
     ReloadConfig,
     IntegrationList,
     IntegrationInstall,
-    CommandPaletteActionList,
+    /// `generation` identifies the palette that asked. A response outlives the
+    /// palette that requested it, and the next one may have been assembled
+    /// under different `[command_palette].sources`.
+    CommandPaletteActionList {
+        generation: u64,
+    },
     PrepareWorktreeCreate {
         workspace_id: String,
     },
@@ -919,6 +924,9 @@ pub(crate) struct ClientShellState {
     pub(super) popup_pending: bool,
     pub(super) popup_pending_deadline: Option<std::time::Instant>,
     pub(super) next_request_id: u64,
+    /// Bumped on every palette open so a plugin-action list can be matched to
+    /// the palette that asked for it.
+    pub(super) command_palette_generation: u64,
     pub(super) pending_requests: HashMap<String, PendingEndpointRequest>,
     pub(super) pending_integration_installs: usize,
     pub(super) pending_notifications: Vec<ClientPendingNotification>,
@@ -1054,6 +1062,7 @@ impl ClientShellState {
             popup_pending: false,
             popup_pending_deadline: None,
             next_request_id: 1,
+            command_palette_generation: 0,
             pending_requests: HashMap::new(),
             pending_integration_installs: 0,
             pending_notifications: Vec::new(),

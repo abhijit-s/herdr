@@ -73,6 +73,10 @@ macro_rules! builtin_catalog {
         fn all_builtin_actions() -> Vec<KeybindAction> {
             vec![ $($ctor)* ]
         }
+        // The returned fn pointer is the point: one accessor per catalog row,
+        // resolved through the same table that generates the entries, so the
+        // keybind column cannot drift from the entry list. Naming the type
+        // would not make it simpler.
         #[allow(clippy::type_complexity)]
         fn builtin_keybind_accessor(
             action: &KeybindAction,
@@ -346,22 +350,30 @@ impl ClientShellState {
             ));
         }
         normalize_entries(&mut entries);
+        // A palette opened during attach latency has no snapshot yet, and
+        // push_endpoint_method_with_kind silently drops the request in that
+        // case. Claiming to be loading when nothing was sent leaves the header
+        // saying so forever, since no response will ever clear it.
+        let requesting_plugins = sources.plugin && self.snapshot.is_some();
         let mut palette = ClientCommandPaletteOverlay {
             query: String::new(),
             entries,
             filtered: Vec::new(),
             selected: 0,
-            loading_plugin_actions: sources.plugin,
+            loading_plugin_actions: requesting_plugins,
         };
         palette.refilter();
         self.overlay = Some(ClientShellOverlay::CommandPalette(palette));
         self.chrome_drag = None;
-        if sources.plugin {
+        self.command_palette_generation = self.command_palette_generation.saturating_add(1);
+        if requesting_plugins {
             self.push_endpoint_method_with_kind(
                 crate::api::schema::Method::PluginActionList(
                     crate::api::schema::PluginActionListParams::default(),
                 ),
-                PendingEndpointKind::CommandPaletteActionList,
+                PendingEndpointKind::CommandPaletteActionList {
+                    generation: self.command_palette_generation,
+                },
                 outcome,
             );
         }
@@ -409,7 +421,10 @@ impl ClientShellState {
 
     /// Rows the palette list can show, from the last render. Drives the page and
     /// half-page jumps; `jump_clamped` stops at the ends, so an off-by-a-row
-    /// estimate before the first render is harmless.
+    /// estimate before the first render is harmless. `set_snapshot` also wipes
+    /// the hit map, so a page key pressed between that wipe and the next render
+    /// moves a single row — self-correcting, and the same trade the help
+    /// overlay makes for its scroll bounds.
     pub(super) fn command_palette_page(&self) -> isize {
         self.hits.command_palette_list_height.max(1) as isize
     }
@@ -516,10 +531,17 @@ impl ClientShellState {
 
     pub(super) fn handle_command_palette_endpoint_result(
         &mut self,
+        generation: u64,
         result: Result<crate::api::schema::ResponseResult, ClientShellEndpointError>,
     ) -> bool {
-        // The palette may already be closed; drop a late list rather than
-        // reopening or stashing a catalog nothing will read.
+        // Drop anything the palette that is open now did not ask for: a late
+        // list from an earlier open would clear this palette's loading state
+        // while its own request is still in flight, and worse, a config reload
+        // between the two opens may have turned the plugin source off — this is
+        // the one path that could otherwise smuggle rows past that gate.
+        if generation != self.command_palette_generation {
+            return false;
+        }
         let Some(ClientShellOverlay::CommandPalette(palette)) = self.overlay.as_mut() else {
             return false;
         };

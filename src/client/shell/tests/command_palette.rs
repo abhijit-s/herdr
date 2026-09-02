@@ -699,11 +699,12 @@ fn unbinding_the_chord_disables_the_palette_entirely() {
 }
 
 #[test]
-fn overlapping_plugin_lists_converge_instead_of_accumulating() {
-    // Close and reopen fast enough and the first open's in-flight list lands on
-    // the second open's palette. Both requests ask for the same catalog, so the
-    // merge has to be idempotent: entries converge on the union rather than
-    // growing a duplicate set per delivery.
+fn only_the_current_palettes_own_plugin_list_is_applied() {
+    // Close and reopen fast enough and the first open's list is still in
+    // flight. It must not land on the second open's palette: it would clear a
+    // spinner whose own request has not returned, and the two opens can have
+    // been assembled under different sources. Only the live request applies,
+    // and it applies exactly once.
     let mut state = default_state();
     let first = open(&mut state);
     state.handle_raw_events(vec![key(KeyCode::Esc)]);
@@ -725,14 +726,83 @@ fn overlapping_plugin_lists_converge_instead_of_accumulating() {
     };
 
     let baseline = palette(&state).entries.len();
-    state.handle_endpoint_result("boot-1", &request_id(&first), actions());
-    let after_first = palette(&state).entries.len();
-    assert_eq!(after_first, baseline + 2);
+    let (repaint, _) = state.handle_endpoint_result("boot-1", &request_id(&first), actions());
+    assert!(!repaint, "a superseded list was applied");
+    assert_eq!(palette(&state).entries.len(), baseline);
+    assert!(
+        palette(&state).loading_plugin_actions,
+        "a superseded list cleared the live request's spinner"
+    );
 
     state.handle_endpoint_result("boot-1", &request_id(&second), actions());
-    assert_eq!(
-        palette(&state).entries.len(),
-        after_first,
-        "a second delivery of the same catalog grew the entry list"
+    assert_eq!(palette(&state).entries.len(), baseline + 2);
+    assert!(!palette(&state).loading_plugin_actions);
+}
+#[test]
+fn a_palette_opened_before_the_first_snapshot_does_not_claim_to_be_loading() {
+    // Endpoint requests are dropped while the client has no snapshot, so a
+    // palette opened during attach latency would sit on "loading plugins…"
+    // forever waiting for a response that was never sent.
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    assert!(state.snapshot.is_none());
+
+    let opened = open(&mut state);
+    assert!(opened.actions.is_empty(), "request sent without a snapshot");
+    assert!(
+        !palette(&state).loading_plugin_actions,
+        "palette waits on a request that was never sent"
+    );
+    // Built-ins still resolve, so the palette is usable immediately.
+    assert!(!palette(&state).filtered.is_empty());
+}
+
+#[test]
+fn a_stale_plugin_list_cannot_smuggle_rows_past_a_disabled_source() {
+    // Open A requests the list, then a config reload turns the plugin source
+    // off before open B. A's in-flight response must not populate B, which was
+    // deliberately assembled without plugin rows.
+    let mut state = default_state();
+    let first = open(&mut state);
+    let [ClientShellAction::Endpoint { request, .. }] = first.actions.as_slice() else {
+        panic!("expected one plugin.action.list request");
+    };
+    let stale_id = request.id.clone();
+    state.handle_raw_events(vec![key(KeyCode::Esc)]);
+
+    let mut next = Config::default();
+    next.command_palette.sources.plugin = false;
+    state.config.apply_live_config(&next, &[], &[]);
+    let reopened = open(&mut state);
+    assert!(reopened.actions.is_empty());
+
+    let (repaint, _) = state.handle_endpoint_result(
+        "boot-1",
+        &stale_id,
+        Ok(crate::api::schema::ResponseResult::PluginActionList {
+            actions: vec![plugin_action("acme", "build", "build")],
+        }),
+    );
+    assert!(!repaint, "a stale list was applied to a later palette");
+    assert!(
+        palette(&state)
+            .entries
+            .iter()
+            .all(|entry| entry.source != ClientPaletteSource::Plugin),
+        "plugin rows reached a palette with the plugin source disabled"
+    );
+}
+
+#[test]
+fn a_too_small_terminal_keeps_its_popup_clickable() {
+    // `panel` draws the frame before the min-size guard returns, so a palette
+    // that is too small to lay out still occupies screen. Reporting no popup
+    // rect would make every click inside the visible box a dismiss.
+    let mut state = default_state();
+    open(&mut state);
+    state.compose(30, 8).expect("composed frame");
+    assert_ne!(
+        state.hits.command_palette_popup,
+        ratatui::layout::Rect::default(),
+        "a drawn palette reported no clickable region"
     );
 }

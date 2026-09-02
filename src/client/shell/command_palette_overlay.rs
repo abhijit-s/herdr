@@ -76,15 +76,18 @@ pub(super) fn command_palette_row(
     let keybind_width = keybind.map(display_width).unwrap_or(0);
 
     // Decide which right-side columns fit, reserving the lead, at least one
-    // name column, and a gap before the right cluster.
-    let with_keybind = keybind_width + 2 + tag_width;
-    let (show_keybind, right_width) = if keybind.is_some() && width >= lead + 2 + with_keybind {
-        (true, with_keybind)
-    } else if width >= lead + 2 + tag_width {
-        (false, tag_width)
-    } else {
-        (false, 0)
-    };
+    // name column, and a gap before the right cluster. A chord label is joined
+    // from every binding of one action, so it is config-sized rather than
+    // screen-sized: these sums saturate instead of wrapping.
+    let with_keybind = keybind_width.saturating_add(2).saturating_add(tag_width);
+    let (show_keybind, right_width) =
+        if keybind.is_some() && width >= lead.saturating_add(2).saturating_add(with_keybind) {
+            (true, with_keybind)
+        } else if width >= lead.saturating_add(2).saturating_add(tag_width) {
+            (false, tag_width)
+        } else {
+            (false, 0)
+        };
 
     out.push((RowSpanKind::Pad, " ".repeat(usize::from(lead))));
 
@@ -141,7 +144,13 @@ pub(super) fn render_command_palette_overlay(
     )?;
     let inner = panel(b, outer, p.accent, p.panel_bg, rounded)?;
     if inner.width < 12 || inner.height < 4 {
-        return Some(OverlayRender::default());
+        // Too small for the header and a list row, but `panel` has already
+        // drawn the frame. Report the popup so a click inside the visible box
+        // is not treated as a click-outside dismiss.
+        return Some(OverlayRender {
+            command_palette_popup: outer,
+            ..OverlayRender::default()
+        });
     }
 
     let base = Style::default()

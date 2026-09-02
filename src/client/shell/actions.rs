@@ -760,9 +760,9 @@ impl ClientShellState {
                 };
                 return (repaint, Vec::new());
             }
-            PendingEndpointKind::CommandPaletteActionList => {
+            PendingEndpointKind::CommandPaletteActionList { generation } => {
                 return (
-                    self.handle_command_palette_endpoint_result(result),
+                    self.handle_command_palette_endpoint_result(generation, result),
                     Vec::new(),
                 );
             }
