@@ -57,6 +57,7 @@ impl ClientShellState {
                 workspace_scroll: &mut self.workspace_scroll,
                 agent_scroll: &mut self.agent_scroll,
                 tab_scroll: &mut self.tab_scroll,
+                reveal_focused_workspace: &mut self.reveal_focused_workspace,
                 reveal_focused_tab: &mut self.reveal_focused_tab,
                 sidebar_collapsed: self.sidebar_collapsed,
                 sidebar_section_split: self.sidebar_section_split,
@@ -269,7 +270,10 @@ impl ClientShellState {
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         self.hits.notification_toast = Rect::default();
         let has_config_diagnostic = self.config_diagnostic.is_some();
-        if has_config_diagnostic || self.visible_notification.is_some() {
+        if has_config_diagnostic
+            || self.visible_endpoint_notice.is_some()
+            || self.visible_notification.is_some()
+        {
             let cursor = frame.cursor.clone();
             let mut composed = frame.to_ratatui_buffer()?;
             if let Some(diagnostic) = self.config_diagnostic.as_deref() {
@@ -285,7 +289,26 @@ impl ClientShellState {
                     &self.config.palette,
                 );
             }
-            if let Some(notification) = self.visible_notification.as_ref() {
+            if let Some(notice) = self.visible_endpoint_notice.as_ref() {
+                self.hits.notification_toast = if layout.mobile_header.is_empty() {
+                    notifications::render_endpoint_notice(
+                        &mut composed,
+                        Rect::new(0, 0, cols, rows),
+                        notice,
+                        u16::from(has_config_diagnostic),
+                        &self.config.palette,
+                        self.config.rounded_borders,
+                    )
+                } else {
+                    notifications::render_mobile_endpoint_notice_banner(
+                        &mut composed,
+                        Rect::new(0, 0, cols, rows),
+                        notice,
+                        has_config_diagnostic,
+                        &self.config.palette,
+                    )
+                };
+            } else if let Some(notification) = self.visible_notification.as_ref() {
                 self.hits.notification_toast = if layout.mobile_header.is_empty() {
                     notifications::render_visible_notification(
                         &mut composed,

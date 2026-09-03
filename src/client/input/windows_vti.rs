@@ -2384,6 +2384,103 @@ mod tests {
     }
 
     #[test]
+    fn vti_us_international_dead_key_only_emits_composed_text() {
+        fn encode_for_kitty(events: Vec<crate::protocol::ClientInputEvent>, flags: u16) -> Vec<u8> {
+            events
+                .into_iter()
+                .flat_map(|event| match event.to_raw_input_event() {
+                    crate::raw_input::RawInputEvent::Key(key) => crate::input::encode_terminal_key(
+                        key,
+                        crate::input::KeyboardProtocol::Kitty { flags },
+                    ),
+                    crate::raw_input::RawInputEvent::Text(text) => {
+                        text.as_str().as_bytes().to_vec()
+                    }
+                    _ => panic!("unexpected event while encoding dead-key input"),
+                })
+                .collect()
+        }
+
+        let dead_press = WindowsKeyRecord {
+            key_down: true,
+            repeat_count: 1,
+            virtual_key_code: 0x36,
+            virtual_scan_code: 0x07,
+            unicode: 0,
+            control_key_state: 0x0030,
+        };
+        let dead_release = WindowsKeyRecord {
+            key_down: false,
+            ..dead_press
+        };
+        let composed_press = WindowsKeyRecord {
+            key_down: true,
+            repeat_count: 1,
+            virtual_key_code: 0x45,
+            virtual_scan_code: 0x12,
+            unicode: 'ê' as u16,
+            control_key_state: 0x0020,
+        };
+        let composed_release = WindowsKeyRecord {
+            key_down: false,
+            unicode: 'e' as u16,
+            ..composed_press
+        };
+
+        let mut translator = WindowsInputTranslator::default();
+        for (record, kind) in [
+            (dead_press, crate::protocol::ClientKeyKind::Press),
+            (dead_release, crate::protocol::ClientKeyKind::Release),
+        ] {
+            let events = translator.translate(WindowsInputRecord::Key(record));
+            assert!(matches!(
+                events.as_slice(),
+                [crate::protocol::ClientInputEvent::Key {
+                    code: crate::protocol::ClientKeyCode::Char('6'),
+                    modifiers,
+                    kind: actual_kind,
+                    generated_text: None,
+                    source: crate::protocol::ClientKeySource::WindowsConsole {
+                        record: actual_record,
+                    },
+                    ..
+                }] if *modifiers == crossterm::event::KeyModifiers::SHIFT.bits()
+                    && *actual_kind == kind
+                    && *actual_record == record
+            ));
+            for flags in [1, 31] {
+                assert!(encode_for_kitty(events.clone(), flags).is_empty());
+            }
+        }
+
+        let events = translator.translate(WindowsInputRecord::Key(composed_press));
+        assert!(matches!(
+            events.as_slice(),
+            [crate::protocol::ClientInputEvent::Key {
+                code: crate::protocol::ClientKeyCode::Char('ê'),
+                kind: crate::protocol::ClientKeyKind::Press,
+                source: crate::protocol::ClientKeySource::WindowsConsole {
+                    record: actual_record,
+                },
+                ..
+            }] if *actual_record == composed_press
+        ));
+        assert_eq!(encode_for_kitty(events, 1), "ê".as_bytes());
+
+        let events = translator.translate(WindowsInputRecord::Key(composed_release));
+        assert!(encode_for_kitty(events, 1).is_empty());
+        assert!(translator.idle().is_empty());
+
+        let ordinary_shifted = WindowsKeyRecord {
+            unicode: '^' as u16,
+            ..dead_press
+        };
+        let events =
+            WindowsInputTranslator::default().translate(WindowsInputRecord::Key(ordinary_shifted));
+        assert_eq!(encode_for_kitty(events, 1), b"^");
+    }
+
+    #[test]
     fn vti_win32_input_mode_non_us_shifted_text_preserves_generated_text() {
         let pressed = WindowsKeyRecord {
             key_down: true,

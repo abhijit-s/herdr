@@ -1579,6 +1579,7 @@ impl AppState {
                 self.handle_pane_died(pane_id);
                 Vec::new()
             }
+            AppEvent::WorktreeRuntimeRestoreFailed { .. } => Vec::new(),
             AppEvent::UpdateReady {
                 version,
                 install_command,
@@ -1815,6 +1816,18 @@ impl AppState {
     where
         F: FnOnce(&mut crate::terminal::TerminalState) -> Option<TerminalStateMutation>,
     {
+        self.update_terminal_state_with_completion_policy(pane_id, false, update)
+    }
+
+    fn update_terminal_state_with_completion_policy<F>(
+        &mut self,
+        pane_id: PaneId,
+        force_suppress_completion: bool,
+        update: F,
+    ) -> Option<PaneStateUpdate>
+    where
+        F: FnOnce(&mut crate::terminal::TerminalState) -> Option<TerminalStateMutation>,
+    {
         let ws_idx = self
             .workspaces
             .iter()
@@ -1856,8 +1869,9 @@ impl AppState {
         }
         let agent_released = mutation.agent_released;
         let change = mutation.effective_state_change.or(unchanged_change)?;
-        let suppress_completion = change.state == AgentState::Idle
-            && (managed_launch_pending || suppress_acquisition_completion);
+        let suppress_completion = force_suppress_completion
+            || (change.state == AgentState::Idle
+                && (managed_launch_pending || suppress_acquisition_completion));
         if change.previous_state != change.state {
             self.next_agent_state_change_seq += 1;
             if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
@@ -1904,23 +1918,28 @@ impl AppState {
     pub(crate) fn publish_pane_process_exit_if_agent(
         &mut self,
         pane_id: PaneId,
+        suppress_completion: bool,
     ) -> Option<PaneStateUpdate> {
         let observed_at = std::time::Instant::now();
-        let update = self.update_terminal_state(pane_id, |terminal| {
-            let agent = terminal.effective_known_agent().or(terminal.detected_agent);
-            if agent.is_none() && !terminal.full_lifecycle_hook_authority_active() {
-                return None;
-            }
-            Some(terminal.set_detected_state_with_screen_signals_at(
-                agent,
-                AgentState::Idle,
-                false,
-                true,
-                false,
-                true,
-                observed_at,
-            ))
-        })?;
+        let update = self.update_terminal_state_with_completion_policy(
+            pane_id,
+            suppress_completion,
+            |terminal| {
+                let agent = terminal.effective_known_agent().or(terminal.detected_agent);
+                if agent.is_none() && !terminal.full_lifecycle_hook_authority_active() {
+                    return None;
+                }
+                Some(terminal.set_detected_state_with_screen_signals_at(
+                    agent,
+                    AgentState::Idle,
+                    false,
+                    true,
+                    false,
+                    true,
+                    observed_at,
+                ))
+            },
+        )?;
         update.agent_released.then_some(update)
     }
 
@@ -3751,7 +3770,7 @@ mod tests {
         assert_eq!(toast.title, "v0.5.0 available");
         assert_eq!(
             toast.context,
-            "detach, run `herdr update`, then follow its restart guidance"
+            "detach, run `herdr update`, then run Herdr again to reconnect"
         );
     }
 
@@ -3772,7 +3791,7 @@ mod tests {
         let toast = state.toast.as_ref().expect("update toast");
         assert_eq!(
             toast.context,
-            "detach, run `brew update && brew upgrade herdr`, then restart this Herdr session when ready"
+            "detach, run `brew update && brew upgrade herdr`, then run Herdr again to reconnect"
         );
     }
 
@@ -3998,7 +4017,7 @@ mod tests {
         );
 
         let update = state
-            .publish_pane_process_exit_if_agent(pane_id)
+            .publish_pane_process_exit_if_agent(pane_id, false)
             .expect("process exit update");
 
         assert!(!state.pane_is_in_active_tab(update.ws_idx, pane_id));

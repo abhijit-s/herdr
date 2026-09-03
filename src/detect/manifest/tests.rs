@@ -660,6 +660,85 @@ fn osc_explain(
 // --- Claude OSC rules ---
 
 #[test]
+fn claude_idle_prompt_with_background_shell_is_idle() {
+    // Captured from Claude Code 2.1.251 after its foreground turn ended while
+    // a long-lived background shell remained active (issue #3414).
+    let screen = concat!(
+        "✻ Sautéed for 10s · 1 shell still running\n\n",
+        "──────────────────────────────────────────────────────── WINDOWS ─\n",
+        "❯\n",
+        "────────────────────────────────────────────────────────────────\n",
+        "  ⏵⏵ auto mode on · 1 shell · ← for agents                     /rc\n",
+    );
+    let result = osc_explain(Agent::Claude, screen, "", "");
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("live_prompt_box")
+    );
+    assert!(result.visible_idle);
+    assert!(!result.visible_working);
+}
+
+#[test]
+fn claude_background_shell_without_foreground_evidence_is_idle_fallback() {
+    let result = osc_explain(
+        Agent::Claude,
+        "  ⏵⏵ auto mode on · 1 shell · ← for agents\n",
+        "",
+        "",
+    );
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(result.matched_rule, None);
+    assert_eq!(
+        result.fallback_reason.as_deref(),
+        Some(DEFAULT_KNOWN_AGENT_IDLE_FALLBACK)
+    );
+    assert!(!result.visible_working);
+}
+
+#[test]
+fn claude_live_turn_with_background_shell_remains_working() {
+    let screen = concat!(
+        "────────────────────────────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────────────────────────────\n",
+        "  ⏵⏵ auto mode on · 1 shell · esc to interrupt\n",
+    );
+    let result = osc_explain(Agent::Claude, screen, "", "");
+
+    assert_eq!(result.state, AgentState::Working);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("live_turn_working")
+    );
+    assert!(result.visible_working);
+}
+
+#[test]
+fn claude_blocker_with_background_shell_remains_blocked() {
+    let screen = concat!(
+        "do you want to proceed?\n",
+        "bash command: rm -rf /tmp/test\n",
+        "❯ 1. Yes\n",
+        "  2. No\n\n",
+        "Esc to cancel · Tab to amend · ctrl+e to explain\n",
+        "  ⏵⏵ auto mode on · 1 shell · ← for agents\n",
+    );
+    let result = osc_explain(Agent::Claude, screen, "", "");
+
+    assert_eq!(result.state, AgentState::Blocked);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("bash_permission_prompt")
+    );
+    assert!(result.visible_blocker);
+    assert!(!result.visible_working);
+}
+
+#[test]
 fn claude_osc_title_braille_prefix_is_working() {
     // "⠂" is U+2802, in the braille block U+2800-U+28FF
     let result = osc_explain(Agent::Claude, "", "⠂ project", "");

@@ -4,6 +4,63 @@ pub(super) const MIN_TAB_WIDTH: u16 = 8;
 pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
 
+fn pane_surface_row<'a>(
+    surface: &'a PaneSurfaceFrame,
+    pane: &crate::protocol::PaneSurfacePane,
+    absolute_row: u32,
+) -> Option<&'a [crate::protocol::CellData]> {
+    let viewport_top = pane
+        .scroll
+        .map(|scroll| {
+            scroll
+                .max_offset_from_bottom
+                .saturating_sub(scroll.offset_from_bottom) as u32
+        })
+        .unwrap_or(0);
+    let viewport_row = u16::try_from(absolute_row.checked_sub(viewport_top)?).ok()?;
+    if viewport_row >= pane.inner_rect.height {
+        return None;
+    }
+    let start = (usize::from(pane.inner_rect.y) + usize::from(viewport_row))
+        * usize::from(surface.frame.width)
+        + usize::from(pane.inner_rect.x);
+    surface
+        .frame
+        .cells
+        .get(start..start + usize::from(pane.inner_rect.width))
+}
+
+fn selection_cells_unchanged(
+    selection: &crate::selection::Selection<String>,
+    previous_surface: &PaneSurfaceFrame,
+    previous_pane: &crate::protocol::PaneSurfacePane,
+    next_surface: &PaneSurfaceFrame,
+    next_pane: &crate::protocol::PaneSurfacePane,
+) -> bool {
+    let ((start_row, start_col), (end_row, end_col)) = selection.ordered_cells();
+    (start_row..=end_row).all(|row| {
+        let first_col = if row == start_row { start_col } else { 0 };
+        let last_col = if row == end_row {
+            end_col
+        } else {
+            previous_pane.inner_rect.width.saturating_sub(1)
+        };
+        pane_surface_row(previous_surface, previous_pane, row)
+            .zip(pane_surface_row(next_surface, next_pane, row))
+            .and_then(|(previous, next)| {
+                previous
+                    .get(usize::from(first_col)..=usize::from(last_col))
+                    .zip(next.get(usize::from(first_col)..=usize::from(last_col)))
+            })
+            .is_some_and(|(previous, next)| {
+                previous
+                    .iter()
+                    .zip(next)
+                    .all(|(previous, next)| previous.symbol == next.symbol)
+            })
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientShellKeybindingSource {
     Local,
@@ -724,8 +781,31 @@ pub(super) enum PendingEndpointKind {
 
 pub(super) struct PendingEndpointRequest {
     pub(super) boot_id: String,
+    pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
     pub(super) kind: PendingEndpointKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(super) enum ClientEndpointNoticeKind {
+    Unsupported,
+    Rejected,
+    Timeout,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct ClientEndpointNoticeKey {
+    pub(super) boot_id: String,
+    pub(super) kind: ClientEndpointNoticeKind,
+    pub(super) code: String,
+}
+
+pub(super) struct ClientVisibleEndpointNotice {
+    pub(super) key: ClientEndpointNoticeKey,
+    pub(super) title: String,
+    pub(super) body: String,
+    pub(super) deadline: std::time::Instant,
 }
 
 pub(crate) struct ClientShellEndpointError {
@@ -888,6 +968,7 @@ pub(crate) struct ClientShellState {
     pub(super) agent_scroll: usize,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
+    pub(super) reveal_focused_workspace: bool,
     pub(super) reveal_mobile_workspace: bool,
     pub(super) mobile_switcher_suspended: bool,
     pub(super) reveal_focused_tab: bool,
@@ -927,10 +1008,16 @@ pub(crate) struct ClientShellState {
     /// Bumped on every palette open so a plugin-action list can be matched to
     /// the palette that asked for it.
     pub(super) command_palette_generation: u64,
+    /// Methods advertised by this endpoint. `None` is used only by local tests
+    /// and legacy construction paths; negotiated endpoint connections always
+    /// install an explicit set.
+    pub(super) endpoint_methods: Option<HashSet<String>>,
     pub(super) pending_requests: HashMap<String, PendingEndpointRequest>,
     pub(super) pending_integration_installs: usize,
     pub(super) pending_notifications: Vec<ClientPendingNotification>,
     pub(super) visible_notification: Option<ClientVisibleNotification>,
+    pub(super) endpoint_notice_seen: HashSet<ClientEndpointNoticeKey>,
+    pub(super) visible_endpoint_notice: Option<ClientVisibleEndpointNotice>,
     pub(super) outer_focused: Option<bool>,
     pub(super) ascii_input_source_active: bool,
     pub(super) pending_input_source_changes: Vec<bool>,
@@ -1026,6 +1113,7 @@ impl ClientShellState {
             agent_scroll: 0,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,
+            reveal_focused_workspace: true,
             reveal_mobile_workspace: false,
             mobile_switcher_suspended: false,
             reveal_focused_tab: true,
@@ -1063,10 +1151,13 @@ impl ClientShellState {
             popup_pending_deadline: None,
             next_request_id: 1,
             command_palette_generation: 0,
+            endpoint_methods: None,
             pending_requests: HashMap::new(),
             pending_integration_installs: 0,
             pending_notifications: Vec::new(),
             visible_notification: None,
+            endpoint_notice_seen: HashSet::new(),
+            visible_endpoint_notice: None,
             outer_focused: None,
             ascii_input_source_active: false,
             pending_input_source_changes: Vec::new(),
@@ -1077,6 +1168,16 @@ impl ClientShellState {
             endpoint_error: None,
             dismissed_product_announcement: None,
         }
+    }
+
+    pub(crate) fn set_endpoint_methods(&mut self, methods: Option<Vec<String>>) {
+        self.endpoint_methods = methods.map(|methods| methods.into_iter().collect());
+    }
+
+    pub(super) fn supports_endpoint_method(&self, method: &crate::api::schema::Method) -> bool {
+        self.endpoint_methods
+            .as_ref()
+            .is_none_or(|methods| methods.contains(crate::api::api_method_name(method)))
     }
 
     fn focused_tab_count(&self) -> usize {
@@ -1164,7 +1265,10 @@ impl ClientShellState {
         }
     }
 
-    pub(crate) fn set_snapshot(&mut self, snapshot: Box<ClientShellSnapshot>) {
+    pub(crate) fn set_snapshot(&mut self, mut snapshot: Box<ClientShellSnapshot>) {
+        snapshot
+            .commands
+            .retain(|command| command.action != crate::protocol::ClientShellCommandAction::Unknown);
         if self.snapshot.as_ref().is_some_and(|current| {
             current.boot_id == snapshot.boot_id && snapshot.revision < current.revision
         }) {
@@ -1232,6 +1336,7 @@ impl ClientShellState {
             self.agent_scroll = 0;
             self.tab_scroll = 0;
             self.mobile_switcher_scroll = 0;
+            self.reveal_focused_workspace = true;
             self.reveal_mobile_workspace = false;
             self.mobile_switcher_suspended = false;
             self.reveal_focused_tab = true;
@@ -1246,6 +1351,8 @@ impl ClientShellState {
             self.pending_integration_installs = 0;
             self.pending_notifications.clear();
             self.visible_notification = None;
+            self.endpoint_notice_seen.clear();
+            self.visible_endpoint_notice = None;
             self.endpoint_error = None;
             self.navigate_workspace_id = None;
             self.overlay = self
@@ -1310,6 +1417,14 @@ impl ClientShellState {
                 || render::tab_bar_right_edge_width(current, tab_bar_width)
                     != render::tab_bar_right_edge_width(&snapshot, tab_bar_width)
         });
+        if self
+            .snapshot
+            .as_deref()
+            .and_then(|current| current.focused_workspace_id.as_deref())
+            != snapshot.focused_workspace_id.as_deref()
+        {
+            self.reveal_focused_workspace = true;
+        }
         if tab_layout_changed
             || self
                 .snapshot
@@ -1531,21 +1646,34 @@ impl ClientShellState {
             self.popup_pending_deadline = None;
         }
         let selection_content_changed = self.selection.as_ref().is_some_and(|selection| {
-            let previous_revision = self.pane_surface.as_ref().and_then(|previous| {
-                previous
-                    .panes
-                    .iter()
-                    .find(|pane| pane.pane_id == selection.pane_id)
-                    .map(|pane| pane.content_revision)
-            });
-            let next_revision = surface
+            let Some(previous_surface) = self.pane_surface.as_ref() else {
+                return false;
+            };
+            let previous = previous_surface
                 .panes
                 .iter()
-                .find(|pane| pane.pane_id == selection.pane_id)
-                .map(|pane| pane.content_revision);
-            previous_revision.is_some()
-                && next_revision.is_some()
-                && previous_revision != next_revision
+                .find(|pane| pane.pane_id == selection.pane_id);
+            let next = surface
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == selection.pane_id);
+            let (Some(previous), Some(next)) = (previous, next) else {
+                return false;
+            };
+            previous.content_revision != next.content_revision
+                && (!selection.is_in_progress()
+                    || !previous.content_revision.is_multiple_of(2)
+                    || !next.content_revision.is_multiple_of(2)
+                    || previous.inner_rect.width != next.inner_rect.width
+                    || previous.inner_rect.height != next.inner_rect.height
+                    || previous.alternate_screen_active != next.alternate_screen_active
+                    || !selection_cells_unchanged(
+                        selection,
+                        previous_surface,
+                        previous,
+                        &surface,
+                        next,
+                    ))
         });
         if selection_content_changed {
             self.selection = None;

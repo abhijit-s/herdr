@@ -78,6 +78,7 @@ pub struct TerminalKey {
     pub shifted_codepoint: Option<u32>,
     pub generated_text: Option<String>,
     physical_identity_hint: bool,
+    windows_shift_dead_key: bool,
     source: KeySource,
 }
 
@@ -91,6 +92,7 @@ impl TerminalKey {
             shifted_codepoint: None,
             generated_text: None,
             physical_identity_hint: false,
+            windows_shift_dead_key: false,
             source: KeySource::Synthesized,
         }
     }
@@ -139,6 +141,7 @@ impl TerminalKey {
 
     #[cfg(any(windows, test))]
     pub fn with_windows_record(mut self, record: WindowsKeyRecord) -> Self {
+        self = self.with_windows_composition_hint(Some(record));
         self.repeat_count = if self.kind == crossterm::event::KeyEventKind::Release {
             1
         } else {
@@ -150,6 +153,16 @@ impl TerminalKey {
             physical_key,
             record,
         };
+        self
+    }
+
+    pub(crate) fn with_windows_composition_hint(
+        mut self,
+        record: Option<WindowsKeyRecord>,
+    ) -> Self {
+        self.windows_shift_dead_key = matches!(self.code, KeyCode::Char(_))
+            && self.modifiers == KeyModifiers::SHIFT
+            && record.is_some_and(|record| record.unicode == 0);
         self
     }
 
@@ -174,6 +187,10 @@ impl TerminalKey {
         }
         #[cfg(not(any(windows, test)))]
         None
+    }
+
+    pub(crate) fn is_windows_shift_dead_key(&self) -> bool {
+        self.windows_shift_dead_key
     }
 
     pub(crate) fn identity(&self) -> KeyIdentity {

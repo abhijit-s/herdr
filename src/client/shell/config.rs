@@ -217,20 +217,8 @@ impl ClientShellConfig {
                 };
                 config.keys.command = commands
                     .iter()
-                    .map(|command| crate::config::CommandKeybindConfig {
-                        key: if command.binding_labels.len() == 1 {
-                            crate::config::BindingConfig::One(command.binding_labels[0].clone())
-                        } else {
-                            crate::config::BindingConfig::Many(command.binding_labels.clone())
-                        },
-                        // Carried so the palette can name the command the way its
-                        // author did; the resolver derives the keybind column from
-                        // whichever chords survive collision resolution here.
-                        label: explicit_command_label(command),
-                        // The client never executes this field; preserve the opaque endpoint ID
-                        // through the shared config collision resolver.
-                        command: command.command_id.clone(),
-                        action_type: match command.action {
+                    .filter_map(|command| {
+                        let action_type = match command.action {
                             crate::protocol::ClientShellCommandAction::Shell => {
                                 crate::config::CommandKeybindType::Shell
                             }
@@ -243,10 +231,26 @@ impl ClientShellConfig {
                             crate::protocol::ClientShellCommandAction::PluginAction => {
                                 crate::config::CommandKeybindType::PluginAction
                             }
-                        },
-                        description: command.description.clone(),
-                        width: None,
-                        height: None,
+                            crate::protocol::ClientShellCommandAction::Unknown => return None,
+                        };
+                        Some(crate::config::CommandKeybindConfig {
+                            key: if command.binding_labels.len() == 1 {
+                                crate::config::BindingConfig::One(command.binding_labels[0].clone())
+                            } else {
+                                crate::config::BindingConfig::Many(command.binding_labels.clone())
+                            },
+                            // Carried so the palette can name the command the way its
+                            // author did; the resolver derives the keybind column from
+                            // whichever chords survive collision resolution here.
+                            label: explicit_command_label(command),
+                            // The client never executes this field; preserve the opaque endpoint ID
+                            // through the shared config collision resolver.
+                            command: command.command_id.clone(),
+                            action_type,
+                            description: command.description.clone(),
+                            width: None,
+                            height: None,
+                        })
                     })
                     .collect();
                 config
@@ -257,6 +261,9 @@ impl ClientShellConfig {
         };
         if self.keybinding_source == ClientShellKeybindingSource::Endpoint {
             for command in commands {
+                let Ok(action) = command.action.try_into() else {
+                    continue;
+                };
                 keybinds
                     .keybinds
                     .custom_commands
@@ -267,7 +274,7 @@ impl ClientShellConfig {
                         label: command.binding_label.clone(),
                         keybind_display: command.keybind_display.clone(),
                         command: command.command_id.clone(),
-                        action: command.action.into(),
+                        action,
                         description: command.description.clone(),
                         width: None,
                         height: None,

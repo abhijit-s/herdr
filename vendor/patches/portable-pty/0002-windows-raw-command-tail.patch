@@ -11,14 +11,14 @@ quotes in the command tail and changes cmd.exe parsing.
 Herdr issue: https://github.com/herdrdev/herdr/issues/1041
 Vendored base: portable-pty 0.9.0
 ---
- vendor/portable-pty/src/cmdbuilder.rs | 44 +++++++++++++++++++++++++++++++
- 1 file changed, 44 insertions(+)
+ vendor/portable-pty/src/cmdbuilder.rs | 40 +++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
 
 diff --git a/vendor/portable-pty/src/cmdbuilder.rs b/vendor/portable-pty/src/cmdbuilder.rs
 index 0000000..0000000 100644
 --- a/vendor/portable-pty/src/cmdbuilder.rs
 +++ b/vendor/portable-pty/src/cmdbuilder.rs
-@@ -237,6 +237,8 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
+@@ -202,6 +202,8 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
  #[cfg_attr(feature = "serde_support", derive(Serialize, Deserialize))]
  pub struct CommandBuilder {
      args: Vec<OsString>,
@@ -27,7 +27,7 @@ index 0000000..0000000 100644
      envs: BTreeMap<OsString, EnvEntry>,
      cwd: Option<OsString>,
      #[cfg(unix)]
-@@ -250,6 +252,8 @@ impl CommandBuilder {
+@@ -215,6 +217,8 @@ impl CommandBuilder {
      pub fn new<S: AsRef<OsStr>>(program: S) -> Self {
          Self {
              args: vec![program.as_ref().to_owned()],
@@ -36,7 +36,7 @@ index 0000000..0000000 100644
              envs: get_base_env(),
              cwd: None,
              #[cfg(unix)]
-@@ -262,6 +266,8 @@ impl CommandBuilder {
+@@ -227,6 +231,8 @@ impl CommandBuilder {
      pub fn from_argv(args: Vec<OsString>) -> Self {
          Self {
              args,
@@ -45,7 +45,7 @@ index 0000000..0000000 100644
              envs: get_base_env(),
              cwd: None,
              #[cfg(unix)]
-@@ -289,6 +295,8 @@ impl CommandBuilder {
+@@ -254,6 +260,8 @@ impl CommandBuilder {
      pub fn new_default_prog() -> Self {
          Self {
              args: vec![],
@@ -54,7 +54,7 @@ index 0000000..0000000 100644
              envs: get_base_env(),
              cwd: None,
              #[cfg(unix)]
-@@ -322,6 +330,15 @@ impl CommandBuilder {
+@@ -287,6 +295,15 @@ impl CommandBuilder {
          }
      }
  
@@ -70,7 +70,7 @@ index 0000000..0000000 100644
      pub fn get_argv(&self) -> &Vec<OsString> {
          &self.args
      }
-@@ -739,6 +756,15 @@ impl CommandBuilder {
+@@ -692,6 +709,15 @@ impl CommandBuilder {
              );
              Self::append_quoted(arg, &mut cmdline);
          }
@@ -86,10 +86,11 @@ index 0000000..0000000 100644
          // Ensure that the command line is nul terminated too!
          cmdline.push(0);
          Ok((exe, cmdline))
-@@ -868,6 +894,29 @@ mod tests {
-         assert!(cmd.get_env("CARGO_PKG_AUTHORS").is_none());
+@@ -810,6 +836,29 @@ mod tests {
+         }
      }
- 
+-
++
 +    #[cfg(windows)]
 +    #[test]
 +    fn raw_arg_appends_unescaped_windows_command_tail() {
@@ -115,4 +116,4 @@ index 0000000..0000000 100644
 +
      #[cfg(windows)]
      #[test]
-     fn windows_environment_rejects_malformed_entries() {
+     fn test_env_case_insensitive_override() {
