@@ -423,6 +423,10 @@ impl TerminalRuntime {
         self.0.visible_hyperlinks(area)
     }
 
+    pub(crate) fn kitty_graphics_may_have_placements(&self) -> bool {
+        self.0.kitty_graphics_may_have_placements()
+    }
+
     pub fn kitty_image_placements_with_data_filter<F>(
         &self,
         needs_data: F,
@@ -454,8 +458,10 @@ impl TerminalRuntime {
         text: Bytes,
         enter: Bytes,
         delay: std::time::Duration,
+        deadline: Option<std::time::Instant>,
     ) -> std::io::Result<std::sync::mpsc::Receiver<std::io::Result<()>>> {
-        self.0.queue_user_input_submission(text, enter, delay)
+        self.0
+            .queue_user_input_submission(text, enter, delay, deadline)
     }
 
     pub fn try_send_paste(&self, text: String) -> Result<(), mpsc::error::TrySendError<Bytes>> {

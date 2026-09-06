@@ -175,6 +175,8 @@ pub const MOUSE_BUTTON_WHEEL_RIGHT: ffi::GhosttyMouseButton =
     ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_SEVEN;
 pub const MOUSE_FORMAT_SGR: ffi::GhosttyMouseFormat =
     ffi::GhosttyMouseFormat_GHOSTTY_MOUSE_FORMAT_SGR;
+pub const MOUSE_FORMAT_SGR_PIXELS: ffi::GhosttyMouseFormat =
+    ffi::GhosttyMouseFormat_GHOSTTY_MOUSE_FORMAT_SGR_PIXELS;
 
 pub const MODE_APPLICATION_CURSOR_KEYS: u16 = 1;
 pub const MODE_FOCUS_EVENT: u16 = 1004;
@@ -1553,6 +1555,11 @@ impl Terminal {
             graphics,
             ffi::GhosttyKittyGraphicsData_GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION,
         )
+    }
+
+    pub(crate) fn kitty_graphics_may_have_placements(&self) -> Result<bool, Error> {
+        let generation = self.kitty_graphics_generation()?;
+        Ok(generation != 0 && self.kitty_empty_generation.get() != Some(generation))
     }
 
     pub fn kitty_image_placements(&self) -> Result<Vec<KittyImagePlacement>, Error> {
@@ -3446,13 +3453,16 @@ mod tests {
         terminal.resize(10, 5, 8, 16).unwrap();
 
         assert_eq!(terminal.kitty_graphics_generation().unwrap(), 0);
+        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
         assert!(terminal.kitty_image_placements().unwrap().is_empty());
 
         terminal.write(b"\x1b_Ga=t,t=d,f=24,i=1,s=1,v=2;////////\x1b\\");
         let transmitted = terminal.kitty_graphics_generation().unwrap();
         assert_ne!(transmitted, 0);
+        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
         assert!(terminal.kitty_image_placements().unwrap().is_empty());
         assert_eq!(terminal.kitty_empty_generation.get(), Some(transmitted));
+        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
 
         terminal.write(b"plain text");
         assert_eq!(terminal.kitty_graphics_generation().unwrap(), transmitted);
@@ -3461,6 +3471,7 @@ mod tests {
         terminal.write(b"\x1b_Ga=p,i=1,p=1,c=1,r=1;\x1b\\");
         let placed = terminal.kitty_graphics_generation().unwrap();
         assert_ne!(placed, transmitted);
+        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
         assert_eq!(terminal.kitty_image_placements().unwrap().len(), 1);
 
         terminal.resize(10, 5, 12, 24).unwrap();
@@ -3471,14 +3482,17 @@ mod tests {
         assert_eq!(terminal.kitty_graphics_generation().unwrap(), placed);
         assert!(terminal.kitty_image_placements().unwrap().is_empty());
         assert_ne!(terminal.kitty_empty_generation.get(), Some(placed));
+        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
         terminal.scroll_viewport_row(0);
         assert_eq!(terminal.kitty_image_placements().unwrap().len(), 1);
 
         terminal.write(b"\x1b_Ga=d,d=A\x1b\\");
         let deleted = terminal.kitty_graphics_generation().unwrap();
         assert_ne!(deleted, placed);
+        assert!(terminal.kitty_graphics_may_have_placements().unwrap());
         assert!(terminal.kitty_image_placements().unwrap().is_empty());
         assert_eq!(terminal.kitty_empty_generation.get(), Some(deleted));
+        assert!(!terminal.kitty_graphics_may_have_placements().unwrap());
     }
 
     #[test]

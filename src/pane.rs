@@ -1392,11 +1392,21 @@ impl PaneRuntimeIo {
         text: Bytes,
         enter: Bytes,
         delay: std::time::Duration,
+        deadline: Option<std::time::Instant>,
     ) -> std::io::Result<std::sync::mpsc::Receiver<std::io::Result<()>>> {
         match self {
-            PaneRuntimeIo::Actor(actor) => actor.queue_user_input_submission(text, enter, delay),
+            PaneRuntimeIo::Actor(actor) => {
+                #[cfg(windows)]
+                return actor.queue_user_input_submission(text, enter, delay, deadline);
+                #[cfg(unix)]
+                {
+                    let _ = deadline;
+                    actor.queue_user_input_submission(text, enter, delay)
+                }
+            }
             #[cfg(test)]
             PaneRuntimeIo::TestChannel { sender, .. } => {
+                let _ = deadline;
                 let sender = sender.clone();
                 let (reply_tx, reply_rx) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
@@ -3076,6 +3086,10 @@ impl PaneRuntime {
         self.terminal.visible_hyperlinks(area)
     }
 
+    pub(crate) fn kitty_graphics_may_have_placements(&self) -> bool {
+        self.terminal.kitty_graphics_may_have_placements()
+    }
+
     pub fn kitty_image_placements_with_data_filter<F>(
         &self,
         needs_data: F,
@@ -3112,8 +3126,10 @@ impl PaneRuntime {
         text: Bytes,
         enter: Bytes,
         delay: std::time::Duration,
+        deadline: Option<std::time::Instant>,
     ) -> std::io::Result<std::sync::mpsc::Receiver<std::io::Result<()>>> {
-        self.io.queue_user_input_submission(text, enter, delay)
+        self.io
+            .queue_user_input_submission(text, enter, delay, deadline)
     }
 
     pub fn try_send_paste(&self, text: String) -> Result<(), mpsc::error::TrySendError<Bytes>> {
