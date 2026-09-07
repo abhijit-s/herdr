@@ -24,9 +24,10 @@ pub use self::{
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, CommandPaletteSources, Config,
         ConfigReloadReport, ConfigReloadStatus, HostCursorModeConfig, NewTerminalCwdConfig,
-        ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle, TabBarPositionConfig,
-        TabCapStyleConfig, ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
-        UpdateChannelConfig, DEFAULT_RESIZE_STEP, MAX_RESIZE_STEP, MAX_TOAST_DELAY_SECONDS,
+        PaneBordersConfig, ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
+        TabBarPositionConfig, TabCapStyleConfig, ToastClipboardPosition, ToastConfig,
+        ToastDelivery, ToastHerdrPosition, UpdateChannelConfig, DEFAULT_RESIZE_STEP,
+        MAX_RESIZE_STEP, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
