@@ -4,6 +4,8 @@ mod actions;
 mod agent_sidebar;
 mod aggregate_navigation;
 mod command_palette;
+mod workspace_navigation;
+use workspace_navigation::WorkspaceNavigationTarget;
 mod composition;
 mod config;
 mod context_menu;
