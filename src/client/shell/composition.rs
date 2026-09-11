@@ -40,35 +40,55 @@ impl ClientShellState {
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
-        super::endpoint_sidebar::render_expanded(
-            &mut buffer,
-            sidebar,
-            self.snapshot.as_deref(),
-            &self.config,
-            &mut render::ShellRenderState {
-                endpoints: &self.endpoints,
-                active_endpoint_id: &self.active_endpoint_id,
-                collapsed_endpoints: &self.collapsed_endpoints,
-                collapsed_groups: &self.collapsed_groups,
-                remote_collapsed_groups: &self.remote_collapsed_groups,
-                workspace_scroll: &mut self.workspace_scroll,
-                agent_scroll: &mut self.agent_scroll,
-                tab_scroll: &mut self.tab_scroll,
-                reveal_focused_workspace: &mut self.reveal_focused_workspace,
-                reveal_focused_tab: &mut self.reveal_focused_tab,
-                sidebar_collapsed: false,
-                sidebar_section_split: self.sidebar_section_split,
-                tab_drag_insert_index: None,
-                selected_workspace_id: self
-                    .navigate_workspace_id
-                    .as_ref()
-                    .filter(|_| valid_navigation_target),
-                reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
-                dragged_workspace_id: None,
-                workspace_drop_indicator_row: None,
-            },
-            &mut self.hits,
-        );
+        // A resize invalidates pane geometry, not the healthy Local workspace chrome.
+        let local_snapshot = self.snapshot.as_deref().filter(|_| {
+            self.endpoints.len() == 1
+                && !self.sidebar_collapsed
+                && layout.sidebar.width > 0
+                && self.endpoint_status(&self.active_endpoint_id)
+                    == Some(ClientEndpointStatus::Online)
+        });
+        let mut render_state = render::ShellRenderState {
+            endpoints: &self.endpoints,
+            active_endpoint_id: &self.active_endpoint_id,
+            collapsed_endpoints: &self.collapsed_endpoints,
+            collapsed_groups: &self.collapsed_groups,
+            remote_collapsed_groups: &self.remote_collapsed_groups,
+            workspace_scroll: &mut self.workspace_scroll,
+            agent_scroll: &mut self.agent_scroll,
+            tab_scroll: &mut self.tab_scroll,
+            reveal_focused_workspace: &mut self.reveal_focused_workspace,
+            reveal_focused_tab: &mut self.reveal_focused_tab,
+            sidebar_collapsed: false,
+            sidebar_section_split: self.sidebar_section_split,
+            tab_drag_insert_index: None,
+            selected_workspace_id: self
+                .navigate_workspace_id
+                .as_ref()
+                .filter(|_| valid_navigation_target),
+            reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
+            dragged_workspace_id: None,
+            workspace_drop_indicator_row: None,
+        };
+        if let Some(snapshot) = local_snapshot {
+            render::render_sidebar(
+                &mut buffer,
+                sidebar,
+                snapshot,
+                &self.config,
+                &mut render_state,
+                &mut self.hits,
+            );
+        } else {
+            super::endpoint_sidebar::render_expanded(
+                &mut buffer,
+                sidebar,
+                self.snapshot.as_deref(),
+                &self.config,
+                &mut render_state,
+                &mut self.hits,
+            );
+        }
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
         }
@@ -87,14 +107,16 @@ impl ClientShellState {
         } else {
             Rect::new(0, 0, cols, 1)
         };
-        render::put_text(
-            &mut buffer,
-            message_area.x,
-            message_area.y,
-            message_area.width,
-            &message,
-            Style::default().fg(self.config.palette.overlay0),
-        );
+        if local_snapshot.is_none() || self.endpoint_error.is_some() {
+            render::put_text(
+                &mut buffer,
+                message_area.x,
+                message_area.y,
+                message_area.width,
+                &message,
+                Style::default().fg(self.config.palette.overlay0),
+            );
+        }
         render::render_mode_bar(
             &mut buffer,
             Rect::new(0, 0, cols, rows),
@@ -109,6 +131,8 @@ impl ClientShellState {
     }
 
     pub(crate) fn compose(&mut self, cols: u16, rows: u16) -> Option<FrameData> {
+        self.last_composed_at = Some(std::time::Instant::now());
+        self.selection_repaint_deadline = None;
         if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {
             self.reveal_navigation_workspace = true;
             self.reveal_mobile_workspace = true;
@@ -329,7 +353,10 @@ impl ClientShellState {
                         hit.inner_rect,
                         hit.scroll,
                         &self.config.palette,
-                        crate::terminal_theme::TerminalTheme::default(),
+                        crate::terminal_theme::TerminalTheme {
+                            background: self.host_background,
+                            ..Default::default()
+                        },
                     );
                 }
                 if copy_surface_coherent {

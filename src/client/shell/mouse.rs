@@ -2,6 +2,7 @@ use super::*;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 const SELECTION_AUTOSCROLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(30);
+const SELECTION_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// Minimum pointer travel before a tab press arms a reorder drag instead of
 /// registering as a click. Real mice/trackpads routinely report a 1-2 cell
@@ -319,11 +320,26 @@ impl ClientShellState {
         true
     }
 
+    pub(super) fn request_selection_drag_repaint(&mut self, now: std::time::Instant) -> bool {
+        let deadline = self
+            .last_composed_at
+            .map(|last| last + SELECTION_REPAINT_INTERVAL);
+        self.selection_repaint_deadline = deadline.filter(|deadline| now < *deadline);
+        self.selection_repaint_deadline.is_none()
+    }
+
     pub(crate) fn tick_selection_autoscroll(
         &mut self,
         now: std::time::Instant,
     ) -> ClientShellInput {
         let mut outcome = ClientShellInput::default();
+        if self
+            .selection_repaint_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.selection_repaint_deadline = None;
+            outcome.repaint = true;
+        }
         if self
             .selection_autoscroll_deadline
             .is_none_or(|deadline| now < deadline)
@@ -1717,7 +1733,9 @@ impl ClientShellState {
             });
             if let Some(hit) = selection_hit {
                 self.update_selection_drag(&hit, mouse.column, mouse.row, outcome);
-                outcome.repaint = true;
+                // Consume every motion, but do not rebuild a frame for every intermediate position.
+                outcome.repaint |= !outcome.actions.is_empty()
+                    || self.request_selection_drag_repaint(std::time::Instant::now());
                 return;
             }
         }
