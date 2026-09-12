@@ -222,6 +222,25 @@ jobs:
             herdr-windows-x86_64.zip/herdr-windows-x86_64.zip
           body_path: RELEASE_NOTES.md
 
+  update-nix-package:
+    needs: release
+    if: github.repository == 'herdrdev/herdr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    continue-on-error: true
+    permissions: {}
+
+    steps:
+      - name: Trigger stable Nix package update
+        env:
+          GH_TOKEN: ${{ secrets.HERDR_NIX_DISPATCH_TOKEN }}
+          GH_HOST: github.com
+        run: |
+          if ! gh workflow run update-check.yml --repo herdrdev/herdr-nix --ref main; then
+            echo "::warning::Nix update could not be triggered. The Herdr release is already published; run update-check manually in herdrdev/herdr-nix."
+            exit 1
+          fi
+
   close-released-issues:
     needs: release
     if: github.repository == 'herdrdev/herdr'

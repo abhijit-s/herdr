@@ -784,7 +784,6 @@ pub(super) enum PendingEndpointKind {
     WordSelection {
         pane_id: String,
         absolute_row: u32,
-        col: u16,
         generation: u64,
     },
     PaneLinkActivate {
@@ -1029,7 +1028,7 @@ pub(crate) struct ClientShellState {
     pub(super) selection_autoscroll: Option<ClientSelectionAutoscroll>,
     pub(super) selection_autoscroll_deadline: Option<std::time::Instant>,
     pub(super) selection_highlight_clear_deadline: Option<std::time::Instant>,
-    pub(super) pending_word_selection: Option<u64>,
+    pub(super) word_selection_gesture: Option<ClientWordSelection>,
     pub(super) word_selection_generation: u64,
     pub(super) copy_mode: Option<ClientCopyModeState>,
     pub(super) copy_session_generation: u64,
@@ -1190,7 +1189,7 @@ impl ClientShellState {
             selection_autoscroll: None,
             selection_autoscroll_deadline: None,
             selection_highlight_clear_deadline: None,
-            pending_word_selection: None,
+            word_selection_gesture: None,
             word_selection_generation: 0,
             copy_mode: None,
             copy_session_generation: 0,
@@ -1380,7 +1379,7 @@ impl ClientShellState {
         self.selection_autoscroll = None;
         self.selection_autoscroll_deadline = None;
         self.selection_highlight_clear_deadline = None;
-        self.pending_word_selection = None;
+        self.word_selection_gesture = None;
         self.copy_mode = None;
         if self.mode == ClientShellMode::Copy {
             self.mode = ClientShellMode::Terminal;
@@ -1396,11 +1395,11 @@ impl ClientShellState {
         snapshot
             .commands
             .retain(|command| command.action != crate::protocol::ClientShellCommandAction::Unknown);
-        let graphics_scope = format!(
-            "{}:{}",
-            self.active_endpoint_id.storage_key(),
-            snapshot.boot_id
-        );
+        let graphics_scope = match &self.active_endpoint_id {
+            // Local direct uploads use image IDs authored by the server from its boot ID.
+            ClientEndpointId::Local => snapshot.boot_id.clone(),
+            endpoint_id => format!("{}:{}", endpoint_id.storage_key(), snapshot.boot_id),
+        };
         let endpoint_boot_changed =
             self.snapshot.is_some() && self.graphics.scope() != graphics_scope;
         if !endpoint_boot_changed
@@ -1528,18 +1527,32 @@ impl ClientShellState {
         {
             self.reveal_focused_tab = true;
         }
-        if self.selection.as_ref().is_some_and(|selection| {
-            snapshot.focused_pane_id.as_deref() != Some(selection.pane_id.as_str())
-                || !snapshot
-                    .panes
-                    .iter()
-                    .any(|pane| pane.pane_id == selection.pane_id)
-        }) {
+        let selection_focus_lost = if let Some(gesture) = self.word_selection_gesture.as_mut() {
+            let focused_pane = snapshot.focused_pane_id.as_deref();
+            // Remember confirmed focus across intermediate snapshots with no
+            // focused pane, without rejecting the gesture's in-flight focus request.
+            gesture.focus_confirmed |= focused_pane == Some(gesture.pane_id.as_str());
+            !snapshot
+                .panes
+                .iter()
+                .any(|pane| pane.pane_id == gesture.pane_id)
+                || (gesture.focus_confirmed
+                    && focused_pane.is_some_and(|pane_id| pane_id != gesture.pane_id))
+        } else {
+            self.selection.as_ref().is_some_and(|selection| {
+                snapshot.focused_pane_id.as_deref() != Some(selection.pane_id.as_str())
+                    || !snapshot
+                        .panes
+                        .iter()
+                        .any(|pane| pane.pane_id == selection.pane_id)
+            })
+        };
+        if selection_focus_lost {
             self.selection = None;
             self.selection_autoscroll = None;
             self.selection_autoscroll_deadline = None;
             self.selection_highlight_clear_deadline = None;
-            self.pending_word_selection = None;
+            self.word_selection_gesture = None;
             self.last_pane_click = None;
         }
         if let Some(copy_pane_id) = self
@@ -1764,7 +1777,7 @@ impl ClientShellState {
             self.selection_autoscroll = None;
             self.selection_autoscroll_deadline = None;
             self.selection_highlight_clear_deadline = None;
-            self.pending_word_selection = None;
+            self.word_selection_gesture = None;
             self.copy_mode = None;
             self.reset_copy_pipeline();
             self.chrome_drag = None;
@@ -1782,38 +1795,51 @@ impl ClientShellState {
             self.popup_pending = false;
             self.popup_pending_deadline = None;
         }
-        let selection_content_changed = self.selection.as_ref().is_some_and(|selection| {
+        let selection_pane = match &self.word_selection_gesture {
+            Some(gesture) => Some(&gesture.pane_id),
+            None => self.selection.as_ref().map(|selection| &selection.pane_id),
+        };
+        let selection_content_changed = selection_pane.is_some_and(|pane_id| {
             let Some(previous_surface) = self.pane_surface.as_ref() else {
                 return false;
             };
             let previous = previous_surface
                 .panes
                 .iter()
-                .find(|pane| pane.pane_id == selection.pane_id);
-            let next = surface
-                .panes
-                .iter()
-                .find(|pane| pane.pane_id == selection.pane_id);
+                .find(|pane| &pane.pane_id == pane_id);
+            let next = surface.panes.iter().find(|pane| &pane.pane_id == pane_id);
             let (Some(previous), Some(next)) = (previous, next) else {
                 return false;
             };
-            previous.inner_rect.width != next.inner_rect.width
+            if previous.inner_rect.width != next.inner_rect.width
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
-                // Manual mouse selections track a live buffer range, not a content revision.
-                || (self.config.copy_on_select
-                && previous.content_revision != next.content_revision
-                && (!previous.content_revision.is_multiple_of(2)
-                    || !next.content_revision.is_multiple_of(2)
-                    || !selection_cells_unchanged(
-                        selection,
-                        previous_surface,
-                        previous,
-                        &surface,
-                        next,
-                    )))
+            {
+                return true;
+            }
+            if previous.content_revision == next.content_revision {
+                return false;
+            }
+            match (&self.word_selection_gesture, &self.selection) {
+                // Word gestures cache boundaries outside the selected cells too.
+                (Some(_), _) => true,
+                (None, Some(selection)) => {
+                    self.config.copy_on_select
+                        && (!previous.content_revision.is_multiple_of(2)
+                            || !next.content_revision.is_multiple_of(2)
+                            || !selection_cells_unchanged(
+                                selection,
+                                previous_surface,
+                                previous,
+                                &surface,
+                                next,
+                            ))
+                }
+                (None, None) => false,
+            }
         });
         if selection_content_changed {
+            self.word_selection_gesture = None;
             self.selection = None;
             self.stop_selection_autoscroll();
             self.selection_highlight_clear_deadline = None;
