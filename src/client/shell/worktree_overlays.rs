@@ -95,6 +95,7 @@ pub(super) fn render_worktree_create_overlay(
             .add_modifier(Modifier::BOLD),
     );
     Some(OverlayRender {
+        area: popup,
         primary: *primary,
         clear: Rect::default(),
         cancel: *cancel,
@@ -282,6 +283,7 @@ pub(super) fn render_worktree_open_overlay(
             .add_modifier(Modifier::BOLD),
     );
     Some(OverlayRender {
+        area: popup,
         primary: *primary,
         clear: Rect::default(),
         cancel: *cancel,
@@ -399,6 +401,7 @@ pub(super) fn render_worktree_remove_overlay(
             .add_modifier(Modifier::BOLD),
     );
     Some(OverlayRender {
+        area: popup,
         primary: *primary,
         clear: Rect::default(),
         cancel: *cancel,

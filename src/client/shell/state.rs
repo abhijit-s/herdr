@@ -3,6 +3,7 @@ use super::*;
 pub(super) const MIN_TAB_WIDTH: u16 = 8;
 pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
+const ENDPOINT_ERROR_TIMEOUT_SECS: u64 = 5;
 
 fn pane_surface_row<'a>(
     surface: &'a PaneSurfaceFrame,
@@ -786,6 +787,9 @@ pub(super) enum PendingEndpointKind {
         absolute_row: u32,
         generation: u64,
     },
+    PaneLinkResolve {
+        target: super::link_hover::LinkHoverTarget,
+    },
     PaneLinkActivate {
         pane_id: String,
         inner_rect: Rect,
@@ -1021,6 +1025,7 @@ pub(crate) struct ClientShellState {
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
     pub(super) pane_mouse_gesture: Option<ClientPaneMouseGesture>,
+    pub(super) link_hover: Option<super::link_hover::LinkHover>,
     pub(super) url_click_consumes_until_up: bool,
     pub(super) replaying_url_click: bool,
     pub(super) selection: Option<crate::selection::Selection<String>>,
@@ -1065,6 +1070,7 @@ pub(crate) struct ClientShellState {
     pub(super) local_config_diagnostic: Option<String>,
     pub(super) config_diagnostic: Option<String>,
     pub(super) endpoint_error: Option<String>,
+    pub(super) endpoint_error_deadline: Option<std::time::Instant>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
 }
 
@@ -1182,6 +1188,7 @@ impl ClientShellState {
             overlay,
             previous_pane_id: None,
             pane_mouse_gesture: None,
+            link_hover: None,
             url_click_consumes_until_up: false,
             replaying_url_click: false,
             selection: None,
@@ -1224,6 +1231,7 @@ impl ClientShellState {
             config_diagnostic: local_config_diagnostic.clone(),
             local_config_diagnostic,
             endpoint_error: None,
+            endpoint_error_deadline: None,
             dismissed_product_announcement: None,
         }
     }
@@ -1365,6 +1373,7 @@ impl ClientShellState {
         self.endpoint_notice_seen.clear();
         self.visible_endpoint_notice = None;
         self.endpoint_error = None;
+        self.endpoint_error_deadline = None;
         self.navigate_workspace_id = None;
         self.overlay = self
             .config
@@ -1372,6 +1381,7 @@ impl ClientShellState {
             .then_some(ClientShellOverlay::Onboarding);
         self.previous_pane_id = None;
         self.pane_mouse_gesture = None;
+        self.link_hover = None;
         self.url_click_consumes_until_up = false;
         self.replaying_url_click = false;
         self.selection = None;
@@ -1481,7 +1491,7 @@ impl ClientShellState {
                 snapshot.server_keybindings_toml.as_deref(),
                 &snapshot.commands,
             ) {
-                self.endpoint_error = Some(err);
+                self.set_endpoint_error(err);
             } else if active_keymap_changed
                 && matches!(
                     self.mode,
@@ -1790,6 +1800,7 @@ impl ClientShellState {
             }
             self.hits.popup = None;
             self.endpoint_error = None;
+            self.endpoint_error_deadline = None;
         }
         if next_popup.is_some() {
             self.popup_pending = false;
@@ -1903,6 +1914,7 @@ impl ClientShellState {
         self.graphics
             .set_scene(std::mem::take(&mut surface.graphics));
         self.pane_surface = Some(surface);
+        self.invalidate_link_hover();
         self.resume_mobile_switcher_if_ready();
         self.reconcile_input_source();
     }
@@ -1947,6 +1959,33 @@ impl ClientShellState {
             repaint = true;
         }
         repaint
+    }
+
+    /// Show a transient client-side action error, restarting its lifetime.
+    ///
+    /// Every assignment must go through this setter so a repeated identical
+    /// message gets a fresh deadline instead of inheriting the previous one.
+    pub(super) fn set_endpoint_error(&mut self, message: impl Into<String>) {
+        self.endpoint_error = Some(message.into());
+        self.endpoint_error_deadline = Some(
+            std::time::Instant::now() + std::time::Duration::from_secs(ENDPOINT_ERROR_TIMEOUT_SECS),
+        );
+    }
+
+    pub(crate) fn tick_endpoint_error(&mut self, now: std::time::Instant) -> bool {
+        if self.endpoint_error.is_none() {
+            self.endpoint_error_deadline = None;
+            return false;
+        }
+        if self
+            .endpoint_error_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.endpoint_error = None;
+            self.endpoint_error_deadline = None;
+            return true;
+        }
+        false
     }
 
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
