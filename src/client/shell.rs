@@ -33,8 +33,10 @@ mod scroll;
 mod settings;
 mod state;
 mod surface_patch;
+mod text_editor;
 mod word_selection;
 mod worktrees;
+use text_editor::TextEditor;
 use word_selection::ClientWordSelection;
 
 pub(in crate::client::shell) use render::sidebar;
@@ -81,15 +83,6 @@ fn delete_trailing_word(input: &mut String) {
     }) {
         input.pop();
     }
-}
-
-fn delete_overlay_word(rename: &mut ClientRenameOverlay) {
-    if rename.replace_on_type {
-        rename.input.clear();
-        rename.replace_on_type = false;
-        return;
-    }
-    delete_trailing_word(&mut rename.input);
 }
 
 fn target_event_message(target: ClientInputTarget, event: ClientPaneInputEvent) -> ClientMessage {
