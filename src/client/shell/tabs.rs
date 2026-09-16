@@ -138,7 +138,7 @@ pub(crate) fn render_tab_bar(
 
     if overflow && mouse_chrome {
         hits.tab_scroll_right = Rect::new(tab_right, area.y, TAB_SCROLL_BUTTON_WIDTH, 1);
-        let can_scroll_right = last_visible.is_some_and(|index| index + 1 < tabs.len());
+        let can_scroll_right = *tab_scroll < max_scroll;
         put_text(
             buffer,
             hits.tab_scroll_right.x,
@@ -393,27 +393,22 @@ fn centered_tab_scroll(focused: usize, widths: &[u16], available: u16, gap: u16)
 }
 
 fn max_tab_scroll(widths: &[u16], available: u16, gap: u16) -> usize {
-    (0..widths.len())
-        .find(|start| {
-            last_visible_tab(*start, widths, available, gap) == widths.len().checked_sub(1)
-        })
-        .unwrap_or(0)
-}
-
-fn last_visible_tab(start: usize, widths: &[u16], available: u16, gap: u16) -> Option<usize> {
-    let mut remaining = available;
-    let mut last = None;
-    for (index, width) in widths.iter().copied().enumerate().skip(start) {
-        if remaining == 0 {
+    let Some((&last, preceding)) = widths.split_last() else {
+        return 0;
+    };
+    let mut start = preceding.len();
+    let mut used = u32::from(last);
+    // Keep the longest fully visible suffix, not merely a sliver of the last tab.
+    // An oversized last tab must still be reachable at the start of the strip.
+    for width in preceding.iter().rev() {
+        let required = used + u32::from(gap) + u32::from(*width);
+        if required > u32::from(available) {
             break;
         }
-        last = Some(index);
-        if width >= remaining {
-            break;
-        }
-        remaining = remaining.saturating_sub(width.saturating_add(gap));
+        used = required;
+        start -= 1;
     }
-    last
+    start
 }
 
 /// Desired tab width for a label: padded to a minimum, then widened by one if
@@ -534,5 +529,25 @@ mod tests {
 
         assert_eq!(tab_gap(Style::Block), 1);
         assert_eq!(tab_gap(Style::Round), 0);
+    }
+
+    #[test]
+    fn trailing_scroll_limit_accounts_for_full_widths_and_separators() {
+        for (widths, available, expected) in [
+            (&[][..], 0, 0),
+            (&[8, 13][..], 0, 1),
+            (&[8, 13][..], 1, 1),
+            (&[8, 13][..], 12, 1),
+            (&[8, 13][..], 21, 1),
+            (&[8, 13][..], 22, 0),
+            (&[8, 13][..], 30, 0),
+            (&[8, u16::MAX][..], u16::MAX, 1),
+        ] {
+            assert_eq!(
+                max_tab_scroll(widths, available, 1),
+                expected,
+                "widths={widths:?}, available={available}"
+            );
+        }
     }
 }

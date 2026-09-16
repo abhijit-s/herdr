@@ -699,7 +699,7 @@ pub enum AttachScrollSource {
 
 /// A single cell in a rendered frame, serialized independently from ratatui's
 /// `Cell` type to keep the wire protocol stable.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct CellData {
     /// Grapheme cluster displayed in this cell (usually 1–2 chars).
     pub symbol: String,
@@ -751,7 +751,7 @@ impl CellData {
 pub type CursorShapeParam = u8;
 
 /// Cursor position within a rendered frame.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct CursorState {
     /// Column offset (0-based) of the cursor.
     pub x: u16,
@@ -1130,7 +1130,7 @@ pub struct ClientShellAgent {
 }
 
 /// Origin-relative geometry for one pane in a rendered pane surface.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct PaneSurfacePane {
     pub pane_id: String,
     pub content_revision: u64,
@@ -1146,7 +1146,7 @@ pub struct PaneSurfacePane {
     pub pixel_height: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct PaneSurfaceScrollMetrics {
     pub offset_from_bottom: u64,
     pub max_offset_from_bottom: u64,
@@ -1163,14 +1163,14 @@ pub struct PaneSurfaceSplit {
     pub path: Vec<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub enum PaneSurfaceSplitDirection {
     Horizontal,
     Vertical,
 }
 
 /// Wire-safe rectangle relative to a pane surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct SurfaceRect {
     pub x: u16,
     pub y: u16,
@@ -1189,13 +1189,13 @@ impl From<ratatui::layout::Rect> for SurfaceRect {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub enum SurfaceGraphicsTarget {
     Pane { pane_id: String },
     Popup { terminal_id: String },
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub enum SurfaceGraphicsSource {
     Terminal {
         target: SurfaceGraphicsTarget,
@@ -1207,14 +1207,14 @@ pub enum SurfaceGraphicsSource {
     },
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub enum SurfaceGraphicsFormat {
     Rgb,
     Rgba,
     Png,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct SurfaceGraphicsAssetKey {
     pub source: SurfaceGraphicsSource,
     pub image_width: u32,
@@ -1232,7 +1232,7 @@ pub struct SurfaceGraphicsAsset {
 }
 
 /// One already-clipped desired placement relative to its target surface.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub struct SurfaceGraphicsPlacement {
     pub asset: SurfaceGraphicsAssetKey,
     pub logical_placement_id: u32,
@@ -1277,7 +1277,7 @@ pub struct PaneSurfaceFrame {
     pub graphics: SurfaceGraphicsScene,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, bincode::Decode)]
 pub enum ClientShellPopupSize {
     Cells(u16),
     Percent(u8),
