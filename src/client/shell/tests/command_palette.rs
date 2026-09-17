@@ -757,6 +757,29 @@ fn a_palette_opened_before_the_first_snapshot_does_not_claim_to_be_loading() {
 }
 
 #[test]
+fn a_palette_opened_against_an_endpoint_missing_plugin_action_list_does_not_hang_loading() {
+    // An endpoint that never advertised plugin.action.list makes
+    // push_endpoint_method_with_kind reject the send before it reaches the
+    // wire. No response will ever arrive to clear the loading flag, so the
+    // open itself must clear it instead of leaving the header stuck on
+    // "loading plugins…" forever.
+    let mut state = default_state();
+    state.set_endpoint_methods(Some(Vec::new()));
+
+    let opened = open(&mut state);
+    assert!(
+        endpoint_methods(&opened).is_empty(),
+        "request sent to an endpoint that does not support it"
+    );
+    assert!(
+        !palette(&state).loading_plugin_actions,
+        "palette waits on a request the endpoint will never receive"
+    );
+    // Built-ins still resolve, so the palette is usable immediately.
+    assert!(!palette(&state).filtered.is_empty());
+}
+
+#[test]
 fn a_stale_plugin_list_cannot_smuggle_rows_past_a_disabled_source() {
     // Open A requests the list, then a config reload turns the plugin source
     // off before open B. A's in-flight response must not populate B, which was

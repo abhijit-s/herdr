@@ -367,7 +367,7 @@ impl ClientShellState {
         self.chrome_drag = None;
         self.command_palette_generation = self.command_palette_generation.saturating_add(1);
         if requesting_plugins {
-            self.push_endpoint_method_with_kind(
+            let sent = self.push_endpoint_method_with_kind(
                 crate::api::schema::Method::PluginActionList(
                     crate::api::schema::PluginActionListParams::default(),
                 ),
@@ -376,6 +376,15 @@ impl ClientShellState {
                 },
                 outcome,
             );
+            // The request can fail to even reach the wire (unsupported method,
+            // endpoint offline). No response will ever arrive to clear the
+            // loading flag in that case, so clear it here instead of leaving
+            // the header stuck on "loading plugins…" forever.
+            if !sent {
+                if let Some(ClientShellOverlay::CommandPalette(palette)) = self.overlay.as_mut() {
+                    palette.loading_plugin_actions = false;
+                }
+            }
         }
     }
 
