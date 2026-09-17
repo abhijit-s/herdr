@@ -14,11 +14,9 @@
 #   HERDR_SKIP_BUILD=1 scripts/install-herdr-local.sh  # swap an already-built target/release/herdr
 #
 # Notable choices (the "why"):
-#   * ZIG: on Apple-Silicon macOS the Xcode Command Line Tools SDK ships a
-#     libSystem.tbd that only declares most symbols under arm64e, so a stock
-#     ziglang.org zig fails to link libghostty-vt ("undefined symbol: _abort"…).
-#     Homebrew's `zig@0.15` carries the arm64-macos backport patch and is the
-#     only zig that links cleanly. This script auto-selects it when present.
+#   * ZIG: the vendored libghostty-vt requires Zig 0.16.0 (see
+#     vendor/libghostty-vt/build.zig.zon's minimum_zig_version). This script
+#     auto-selects Homebrew's plain `zig` formula when present.
 #   * Fresh-inode swap (rm + cp, never in-place cp): overwriting the running
 #     binary in place poisons the kernel's vnode cache and can crash a live
 #     process mapping it. Removing then copying gives the new file a new inode.
@@ -53,8 +51,8 @@ resolve_path() {
 
 pick_zig() {
   if [ -n "${ZIG:-}" ]; then printf '%s\n' "$ZIG"; return; fi
-  if [ "$OS" = "Darwin" ] && [ -x /opt/homebrew/opt/zig@0.15/bin/zig ]; then
-    printf '%s\n' /opt/homebrew/opt/zig@0.15/bin/zig; return
+  if [ "$OS" = "Darwin" ] && [ -x /opt/homebrew/opt/zig/bin/zig ]; then
+    printf '%s\n' /opt/homebrew/opt/zig/bin/zig; return
   fi
   command -v zig || { echo "error: no zig found. Set ZIG=/path/to/zig." >&2; exit 1; }
 }
@@ -63,8 +61,8 @@ pick_zig() {
 if [ "${HERDR_SKIP_BUILD:-0}" != "1" ]; then
   ZIG_BIN="$(pick_zig)"
   echo "==> building release (ZIG=$ZIG_BIN)"
-  if [ "$OS" = "Darwin" ] && [ "$ZIG_BIN" != "/opt/homebrew/opt/zig@0.15/bin/zig" ]; then
-    echo "    warning: not using Homebrew zig@0.15 — link may fail on Apple-Silicon macOS." >&2
+  if [ "$OS" = "Darwin" ] && [ "$ZIG_BIN" != "/opt/homebrew/opt/zig/bin/zig" ]; then
+    echo "    warning: not using Homebrew zig — build may fail if this zig doesn't meet libghostty-vt's minimum version." >&2
   fi
   # Clear inherited herdr socket overrides so a build launched from inside a
   # running herdr session is unaffected; they don't influence cargo but are
