@@ -126,6 +126,8 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_popup: Rect,
     pub(super) navigator_search: Rect,
     pub(super) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
+    pub(super) navigator_scrollbar: Rect,
+    pub(super) navigator_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
     pub(super) command_palette_popup: Rect,
@@ -203,6 +205,9 @@ pub(super) enum ClientChromeDrag {
         grab_row_offset: u16,
     },
     HelpScrollbar {
+        grab_row_offset: u16,
+    },
+    NavigatorScrollbar {
         grab_row_offset: u16,
     },
     ProductAnnouncementScrollbar {
@@ -346,10 +351,6 @@ pub(super) enum ClientNavigatorTarget {
         endpoint_id: ClientEndpointId,
         workspace_id: String,
     },
-    Tab {
-        endpoint_id: ClientEndpointId,
-        tab_id: String,
-    },
     Pane {
         endpoint_id: ClientEndpointId,
         pane_id: String,
@@ -361,6 +362,8 @@ pub(super) struct ClientNavigatorRow {
     pub(super) depth: u8,
     pub(super) label: String,
     pub(super) meta: String,
+    pub(super) detail: String,
+    pub(super) agent: Option<String>,
     pub(super) status: Option<crate::api::schema::AgentStatus>,
     pub(super) stale: bool,
     pub(super) current: bool,
@@ -374,7 +377,6 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) selected: Option<ClientNavigatorTarget>,
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
-    pub(super) expanded_workspaces: HashSet<(ClientEndpointId, String)>,
 }
 
 #[derive(Debug)]
