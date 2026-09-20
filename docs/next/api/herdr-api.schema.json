@@ -808,6 +808,12 @@
             "pane_id": {
               "type": "string"
             },
+            "restore_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "revision": {
               "format": "uint64",
               "minimum": 0,
@@ -8080,6 +8086,12 @@
             },
             "pane_id": {
               "type": "string"
+            },
+            "restore_error": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "revision": {
               "format": "uint64",
