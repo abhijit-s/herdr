@@ -159,6 +159,7 @@ builtin_catalog! {
     entry SplitVertical          split_vertical           "split-vertical"           "Split the pane vertically";
     entry SplitHorizontal        split_horizontal         "split-horizontal"         "Split the pane horizontally";
     entry ClosePane              close_pane               "close-pane"               "Close the current pane";
+    entry ClearPane              clear_pane               "clear-pane"               "Clear the pane screen and scrollback";
     entry EditScrollback         edit_scrollback          "edit-scrollback"          "Edit the scrollback buffer";
     entry CopyMode               copy_mode                "copy-mode"                "Enter copy mode";
     entry Zoom                   zoom                     "zoom"                     "Toggle pane zoom";
