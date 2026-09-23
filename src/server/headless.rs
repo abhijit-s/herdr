@@ -808,7 +808,7 @@ impl HeadlessServer {
         self.app.sync_pending_agent_resume_deadline(now);
         if self
             .app
-            .start_pending_agent_resumes(self.app.pending_agent_resume_due(now))
+            .start_pending_agent_resumes(now, self.app.pending_agent_resume_due(now))
         {
             for client in self.clients.values_mut() {
                 client.request_recompute();
@@ -2970,6 +2970,7 @@ impl HeadlessServer {
         &mut self,
         msg: api::ApiRequestMessage,
         skip_default_workspace_for_request: bool,
+        client_local: bool,
     ) -> bool {
         if self.shutting_down {
             // During shutdown, respond with server_unavailable.
@@ -3124,12 +3125,18 @@ impl HeadlessServer {
         }
         if matches!(
             &msg.request.method,
-            api::schema::Method::WorktreeCreate(_) | api::schema::Method::WorktreeRemove(_)
+            api::schema::Method::WorktreeCreate(_)
+                | api::schema::Method::WorktreeRemove(_)
+                | api::schema::Method::WorktreeList(_)
+                | api::schema::Method::WorktreeOpen(_)
         ) {
-            let deferred_changed = self
-                .app
-                .handle_deferred_worktree_api_request(msg.request, msg.respond_to);
-            return changed | deferred_changed;
+            let read_only = matches!(&msg.request.method, api::schema::Method::WorktreeList(_));
+            let deferred_changed = self.app.handle_deferred_worktree_api_request(
+                msg.request,
+                msg.respond_to,
+                client_local,
+            );
+            return changed | (deferred_changed && !read_only);
         }
         if self.foreground_client_id.is_some_and(|client_id| {
             self.clients
@@ -3448,7 +3455,7 @@ impl HeadlessServer {
             self.app.sync_pending_agent_resume_deadline(now);
             changed |= self
                 .app
-                .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
+                .start_pending_agent_resumes(now, self.app.pending_agent_resume_due(now));
         }
         changed
     }

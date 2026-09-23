@@ -45,6 +45,14 @@ impl App {
                 command,
                 result,
             } => self.handle_status_command_finished(generation, command, result),
+            AppEvent::WorktreeReadFinished(result) => {
+                let changes_workspace = matches!(
+                    &result.request.method,
+                    crate::api::schema::Method::WorktreeOpen(_)
+                );
+                self.handle_api_worktree_read_finished(*result);
+                changes_workspace
+            }
             ev @ AppEvent::TerminalBell { .. } => {
                 self.handle_internal_event(ev);
                 false
@@ -170,6 +178,11 @@ impl App {
                     crate::api::schema::PluginCommandStatus::Failed
                 };
             }
+            return Vec::new();
+        }
+
+        if let AppEvent::WorktreeReadFinished(result) = ev {
+            self.handle_api_worktree_read_finished(*result);
             return Vec::new();
         }
 
@@ -1057,7 +1070,13 @@ impl App {
             Method::WorkspaceClose(target) => {
                 return self.handle_workspace_close(request.id, target);
             }
-            Method::WorktreeList(params) => return self.handle_worktree_list(request.id, params),
+            Method::WorktreeList(_) | Method::WorktreeOpen(_) => {
+                return responses::encode_error(
+                    request.id,
+                    "invalid_request",
+                    "worktree discovery is handled asynchronously by the app runtime",
+                );
+            }
             Method::WorktreeCreate(params) => {
                 let _ = params;
                 return responses::encode_error(
@@ -1066,7 +1085,6 @@ impl App {
                     "worktree.create is handled asynchronously by the app runtime",
                 );
             }
-            Method::WorktreeOpen(params) => return self.handle_worktree_open(request.id, params),
             Method::WorktreeRemove(params) => {
                 let _ = params;
                 return responses::encode_error(

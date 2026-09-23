@@ -4,6 +4,7 @@ mod actions;
 mod agent_sidebar;
 mod aggregate_navigation;
 mod command_palette;
+mod machine_diagnostics;
 mod workspace_navigation;
 use workspace_navigation::{PendingWorkspaceHighlight, WorkspaceNavigationTarget};
 mod composition;
