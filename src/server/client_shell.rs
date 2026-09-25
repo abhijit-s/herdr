@@ -293,6 +293,7 @@ pub(super) struct RenderedPaneSurface {
     pub(super) popup: Option<Box<protocol::ClientShellPopupSurface>>,
     pub(super) graphics: protocol::SurfaceGraphicsScene,
     pub(super) graphics_delivery: crate::kitty_graphics::surface::DeliveryCache,
+    pub(super) graphics_sources: crate::kitty_graphics::surface::SourceFiles,
 }
 
 #[derive(Debug)]
@@ -457,16 +458,17 @@ pub(super) fn render_pane_surface(
     let popup = show_popup
         .then(|| render_popup_surface(app, area, resize_panes, cell_size))
         .flatten();
-    let (graphics, next_graphics_delivery) = crate::server::client_shell_graphics::collect(
-        app,
-        &layout.pane_infos,
-        &layout.split_borders,
-        popup.as_deref(),
-        target,
-        cell_size,
-        graphics_delivery,
-        client_id,
-    );
+    let (graphics, next_graphics_delivery, graphics_sources) =
+        crate::server::client_shell_graphics::collect(
+            app,
+            &layout.pane_infos,
+            &layout.split_borders,
+            popup.as_deref(),
+            target,
+            cell_size,
+            graphics_delivery,
+            client_id,
+        );
     if let Some(target) = target {
         for (&pane_id, &(epoch, _)) in &content_revisions_before {
             if let Some(runtime) = app.state.runtime_for_pane_in_workspace(
@@ -507,6 +509,7 @@ pub(super) fn render_pane_surface(
         popup,
         graphics,
         graphics_delivery: next_graphics_delivery,
+        graphics_sources,
     })
 }
 
