@@ -8,6 +8,7 @@
 //! client already owned before the palette existed.
 
 use super::*;
+use crate::config::BindingConfig;
 use crate::protocol::ClientShellCommand;
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -42,7 +43,11 @@ fn default_state() -> ClientShellState {
 
 /// Drive the real configured trigger: prefix, then the palette chord.
 fn press_palette_chord(state: &mut ClientShellState) -> ClientShellInput {
-    let (code, modifiers) = state.config.keybinds.prefix;
+    let (code, modifiers) = state
+        .config
+        .keybinds
+        .primary_prefix()
+        .expect("configured prefix");
     state.handle_raw_events(vec![key_event(code, modifiers)]);
     state.handle_raw_events(vec![typed(':')])
 }
@@ -342,7 +347,7 @@ fn both_keybinding_sources_recover_the_same_label_and_chord_split() {
     let unlabelled = shell_command("cmd_raw", "prefix+ctrl+j", &["prefix+ctrl+j"]);
 
     let mut endpoint_config = Config::default();
-    endpoint_config.keys.prefix = "ctrl+b".into();
+    endpoint_config.keys.prefix = BindingConfig::one("ctrl+b");
     for source in [
         ClientShellKeybindingSource::Local,
         ClientShellKeybindingSource::Endpoint,
