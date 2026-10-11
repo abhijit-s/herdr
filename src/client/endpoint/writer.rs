@@ -134,7 +134,7 @@ impl EndpointTransport for NativeEndpointTransport {
         let len = frame.len();
         if self
             .queued_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |bytes| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |bytes| {
                 bytes
                     .checked_add(len)
                     .filter(|total| *total <= MAX_QUEUED_BYTES)
