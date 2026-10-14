@@ -156,6 +156,8 @@ mod tests {
             "product_announcement.dismiss",
             "release_notes.dismiss",
             "command.invoke",
+            "status.set",
+            "status.clear",
             "workspace.create",
             "workspace.focus",
             "workspace.rename",
