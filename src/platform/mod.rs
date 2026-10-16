@@ -316,6 +316,33 @@ pub(crate) fn terminal_erase_byte() -> Option<u8> {
     None
 }
 
+/// Error kind marker for a terminal that momentarily has no usable grid.
+///
+/// A window drag can sample a zero-sized grid before the terminal settles, so
+/// this is distinct from a real terminal failure. Startup still rejects it; the
+/// resize watcher treats it as a transient sample instead of a dead terminal.
+#[derive(Debug)]
+pub(crate) struct ZeroSizedGridError;
+
+impl std::fmt::Display for ZeroSizedGridError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("terminal reported a zero-sized grid")
+    }
+}
+
+impl std::error::Error for ZeroSizedGridError {}
+
+pub(crate) fn zero_sized_terminal_grid_error() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, ZeroSizedGridError)
+}
+
+/// Whether an error only means the terminal has no usable size yet, so a
+/// resizing terminal should keep its last known geometry instead of detaching.
+pub(crate) fn is_transient_terminal_grid_error(err: &std::io::Error) -> bool {
+    err.get_ref()
+        .is_some_and(|inner| inner.is::<ZeroSizedGridError>())
+}
+
 pub(crate) fn terminal_grid_size() -> std::io::Result<(u16, u16)> {
     #[cfg(unix)]
     let (cols, rows) = unix_common::read_terminal_grid_size()?;
@@ -325,17 +352,41 @@ pub(crate) fn terminal_grid_size() -> std::io::Result<(u16, u16)> {
     let (cols, rows) = fallback::read_terminal_grid_size()?;
 
     if cols == 0 || rows == 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "terminal reported a zero-sized grid",
-        ));
+        return Err(zero_sized_terminal_grid_error());
     }
     Ok((cols, rows))
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std::io::Result<u32> {
     command.spawn().map(|child| child.id())
+}
+
+/// Starts the daemon through launchd, so quitting the terminal app that
+/// started it does not take the server down (herdr#4920). Over SSH, or when
+/// launchd cannot carry the command exactly, it spawns a detached child.
+/// Returns the child's pid, or 0 when launchd started it.
+#[cfg(target_os = "macos")]
+pub fn launch_server_daemon_command(command: &mut std::process::Command) -> std::io::Result<u32> {
+    match macos::spawn_launchd_job(command) {
+        Ok(_label) => Ok(0),
+        Err(err) => {
+            tracing::info!(%err, "starting the server directly instead of through launchd");
+            command.spawn().map(|child| child.id())
+        }
+    }
+}
+
+/// First step of a server process; see `launch_server_daemon_command`.
+/// Returns a warning to log once logging is initialized.
+#[cfg(target_os = "macos")]
+pub(crate) fn leave_launcher_job() -> Option<String> {
+    macos::leave_launchd_job()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn leave_launcher_job() -> Option<String> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]
